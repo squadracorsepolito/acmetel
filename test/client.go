@@ -16,10 +16,10 @@ func main() {
 		panic(err)
 	}
 
-	f := cannelloni.NewCannelloniFrame(0, 0)
+	f := cannelloni.NewFrame(0, 0)
 
 	for i := range 10 {
-		msg := cannelloni.NewCannelloniFrameMessage(uint32(i*1000), []byte("hello"))
+		msg := cannelloni.NewFrameMessage(uint32(i*1000), []byte("hello"))
 		f.AddMessage(msg)
 	}
 

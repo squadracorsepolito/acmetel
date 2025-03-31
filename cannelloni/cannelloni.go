@@ -5,31 +5,31 @@ import (
 	"errors"
 )
 
-type CannelloniFrameMessage struct {
+type FrameMessage struct {
 	CANID      uint32
 	DataLen    uint8
 	CANFDFlags uint8
 	Data       []byte
 }
 
-func NewCannelloniFrameMessage(canID uint32, data []byte) *CannelloniFrameMessage {
-	return &CannelloniFrameMessage{
+func NewFrameMessage(canID uint32, data []byte) *FrameMessage {
+	return &FrameMessage{
 		CANID:   canID,
 		DataLen: uint8(len(data)),
 		Data:    data,
 	}
 }
 
-type CannelloniFrame struct {
+type Frame struct {
 	Version        uint8
 	OPCode         uint8
 	SequenceNumber uint8
 	MessageCount   uint16
-	Messages       []*CannelloniFrameMessage
+	Messages       []*FrameMessage
 }
 
-func NewCannelloniFrame(sequenceNumber uint8, messageCount uint16) *CannelloniFrame {
-	return &CannelloniFrame{
+func NewFrame(sequenceNumber uint8, messageCount uint16) *Frame {
+	return &Frame{
 		Version:        1,
 		OPCode:         0,
 		SequenceNumber: sequenceNumber,
@@ -37,19 +37,19 @@ func NewCannelloniFrame(sequenceNumber uint8, messageCount uint16) *CannelloniFr
 	}
 }
 
-func DecodeFrame(buf []byte) (*CannelloniFrame, error) {
+func DecodeFrame(buf []byte) (*Frame, error) {
 	if len(buf) < 5 {
 		return nil, errors.New("not enough data")
 	}
 
-	f := new(CannelloniFrame)
+	f := new(Frame)
 
 	f.Version = buf[0]
 	f.OPCode = buf[1]
 	f.SequenceNumber = buf[2]
 	f.MessageCount = binary.BigEndian.Uint16(buf[3:5])
 
-	f.Messages = make([]*CannelloniFrameMessage, f.MessageCount)
+	f.Messages = make([]*FrameMessage, f.MessageCount)
 	pos := 5
 	for i := uint16(0); i < f.MessageCount; i++ {
 		msg, n, err := decodeFrameMessage(buf[pos:])
@@ -64,12 +64,12 @@ func DecodeFrame(buf []byte) (*CannelloniFrame, error) {
 	return f, nil
 }
 
-func decodeFrameMessage(buf []byte) (*CannelloniFrameMessage, int, error) {
+func decodeFrameMessage(buf []byte) (*FrameMessage, int, error) {
 	if len(buf) < 5 {
 		return nil, 0, errors.New("not enough data")
 	}
 
-	msg := new(CannelloniFrameMessage)
+	msg := new(FrameMessage)
 
 	n := 5
 
@@ -102,7 +102,7 @@ func decodeFrameMessage(buf []byte) (*CannelloniFrameMessage, int, error) {
 	return msg, n, nil
 }
 
-func (f *CannelloniFrame) Encode() []byte {
+func (f *Frame) Encode() []byte {
 	buf := make([]byte, 5)
 
 	buf[0] = f.Version
@@ -118,12 +118,12 @@ func (f *CannelloniFrame) Encode() []byte {
 	return buf
 }
 
-func (f *CannelloniFrame) AddMessage(msg *CannelloniFrameMessage) {
+func (f *Frame) AddMessage(msg *FrameMessage) {
 	f.Messages = append(f.Messages, msg)
 	f.MessageCount++
 }
 
-func (cfm *CannelloniFrameMessage) Encode() []byte {
+func (cfm *FrameMessage) Encode() []byte {
 	isCANFD := cfm.CANFDFlags != 0
 
 	baseSize := 5

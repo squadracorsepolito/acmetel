@@ -1,71 +1,93 @@
-package main
+package acmetel
 
 import (
-	"fmt"
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"net"
 	"net/netip"
-	"time"
 
-	"github.com/squadracorsepolito/acmelib"
-	"github.com/squadracorsepolito/acmetel/cannelloni"
+	"github.com/squadracorsepolito/acmetel/internal"
 )
 
-const serverIP = "127.0.0.1"
-const serverPort = 20_000
-const bufferSize = 2048
+type ServerUDP struct {
+	l *slog.Logger
 
-type Message struct {
-	Timestamp time.Time
-	CANID     acmelib.CANID
-	DataLen   int
-	RawData   []byte
+	cfg  *ServerUDPConfig
+	rb   *internal.RingBuffer[[]byte]
+	addr *net.UDPAddr
 }
 
-func newMessage(timestamp time.Time, cannelloniMsg *cannelloni.CannelloniFrameMessage) *Message {
-	return &Message{
-		Timestamp: timestamp,
-		CANID:     acmelib.CANID(cannelloniMsg.CANID),
-		DataLen:   int(cannelloniMsg.DataLen),
-		RawData:   cannelloniMsg.Data,
+type ServerUDPConfig struct {
+	IPAddr     string
+	Port       uint16
+	BufferSize int
+}
+
+func NewDefaultServerUDPConfig() *ServerUDPConfig {
+	return &ServerUDPConfig{
+		IPAddr:     "127.0.0.1",
+		Port:       20_000,
+		BufferSize: 2048,
 	}
 }
 
-func (m *Message) String() string {
-	timeStr := fmt.Sprintf("%s", m.Timestamp.Format(time.StampMilli))
-	return fmt.Sprintf("%s -> CANID: %d, DataLen: %d, Data: %s", timeStr, m.CANID, m.DataLen, m.RawData)
+func NewServerUDP(rb *internal.RingBuffer[[]byte], cfg *ServerUDPConfig) *ServerUDP {
+	return &ServerUDP{
+		l: slog.Default(),
+
+		cfg:  cfg,
+		rb:   rb,
+		addr: net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr(cfg.IPAddr), cfg.Port)),
+	}
 }
 
-func main() {
-	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr(serverIP), serverPort))
-
-	conn, err := net.ListenUDP("udp", addr)
+func (s *ServerUDP) Run(ctx context.Context) error {
+	conn, err := net.ListenUDP("udp", s.addr)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	defer conn.Close()
 
-	buf := make([]byte, bufferSize)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				conn.Close()
+				return
+			default:
+			}
+		}
+	}()
+
+	buf := make([]byte, s.cfg.BufferSize)
 
 	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			panic(err)
+		select {
+		case <-ctx.Done():
+			s.l.Info("server stopped", "reason", ctx.Err())
+			return nil
+		default:
 		}
 
-		f, err := cannelloni.DecodeFrame(buf[:n])
+		_, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			if errors.Is(err, net.ErrClosed) {
+				select {
+				case <-ctx.Done():
+					s.l.Info("server stopped", "reason", ctx.Err())
+
+				default:
+					s.l.Error("server conn closed")
+				}
+
+				return nil
+			}
+
+			return err
 		}
 
-		timestamp := time.Now()
-
-		// log.Printf("Version: %d, OPCode: %d, SequenceNumber: %d, MessageCount: %d", f.Version, f.OPCode, f.SequenceNumber, f.MessageCount)
-
-		for _, cannelloniMsg := range f.Messages {
-			// log.Printf("%s -> CANID: %d, DataLen: %d, Data: %s", timestamp.Format(time.RFC3339), msg.CANID, msg.DataLen, msg.Data)
-			msg := newMessage(timestamp, cannelloniMsg)
-			log.Print(msg)
+		if err := s.rb.Put(ctx, buf); err != nil {
+			s.l.Error("server failed to put to ring buffer", "reason", err)
 		}
 	}
 }
