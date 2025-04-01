@@ -18,7 +18,7 @@ func main() {
 	f := cannelloni.NewFrame(0, 0)
 
 	for i := range 10 {
-		msg := cannelloni.NewFrameMessage(uint32(i*1000), []byte("hello"))
+		msg := cannelloni.NewFrameMessage(uint32(i*1000), []byte{0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8})
 		f.AddMessage(msg)
 	}
 
