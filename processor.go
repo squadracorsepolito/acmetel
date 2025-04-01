@@ -3,6 +3,7 @@ package acmetel
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/core"
@@ -14,7 +15,7 @@ type Processor struct {
 
 	in *internal.RingBuffer[*core.Message]
 
-	processedMsgCount int
+	msgCount atomic.Uint64
 }
 
 func NewProcessor() *Processor {
@@ -44,12 +45,13 @@ func (p *Processor) Run(ctx context.Context) {
 			return
 
 		case <-ticker.C:
-			if p.processedMsgCount == 0 {
+			msgPerSec := p.msgCount.Load()
+			if msgPerSec == 0 {
 				continue
 			}
 
-			p.l.Info("stats", "msg_per_sec", p.processedMsgCount)
-			p.processedMsgCount = 0
+			p.l.Info("stats", "msg_per_sec", msgPerSec)
+			p.msgCount.Store(0)
 
 		default:
 		}
@@ -72,7 +74,7 @@ func (p *Processor) SetInput(connector *internal.RingBuffer[*core.Message]) {
 
 func (p *Processor) process(_ context.Context, _ *core.Message) {
 	// p.l.Info("processing message", "message", msg.String())
-	p.processedMsgCount++
+	p.msgCount.Add(1)
 }
 
 // type processorWorker struct {

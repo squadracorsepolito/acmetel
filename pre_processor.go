@@ -3,6 +3,7 @@ package acmetel
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/squadracorsepolito/acmelib"
@@ -16,6 +17,8 @@ type CannelloniPreProcessor struct {
 
 	in  *internal.RingBuffer[[]byte]
 	out *internal.RingBuffer[*core.Message]
+
+	frameCount atomic.Uint64
 }
 
 func NewCannelloniPreProcessor() *CannelloniPreProcessor {
@@ -42,10 +45,21 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 	p.l.Info("starting run")
 	defer p.l.Info("quitting run")
 
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-ticker.C:
+			framePerSec := p.frameCount.Load()
+			if framePerSec != 0 {
+				p.l.Info("stats", "frame_per_sec", framePerSec)
+				p.frameCount.Store(0)
+			}
+
 		default:
 		}
 
@@ -69,6 +83,8 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 				p.l.Warn("failed to write into output connector", "reason", err)
 			}
 		}
+
+		p.frameCount.Add(1)
 	}
 }
 

@@ -15,8 +15,8 @@ func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	ingressToPreProc := internal.NewRingBuffer[[]byte](2048)
-	preProcToProc := internal.NewRingBuffer[*core.Message](4096)
+	ingressToPreProc := internal.NewRingBuffer[[]byte](1024)
+	preProcToProc := internal.NewRingBuffer[*core.Message](1024)
 
 	ingress := acmetel.NewUDPIngress(acmetel.NewDefaultUDPIngressConfig())
 	ingress.SetOutput(ingressToPreProc)

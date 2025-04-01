@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync/atomic"
+	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
 )
@@ -18,6 +20,8 @@ type UDPIngress struct {
 	conn *net.UDPConn
 
 	out *internal.RingBuffer[[]byte]
+
+	packetCount atomic.Uint64
 }
 
 type UDPIngressConfig struct {
@@ -72,7 +76,21 @@ func (in *UDPIngress) Run(ctx context.Context) {
 	in.l.Info("starting run")
 	defer in.l.Info("quitting run")
 
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	for {
+		select {
+		case <-ticker.C:
+			packetsPerSec := in.packetCount.Load()
+			if packetsPerSec != 0 {
+				in.l.Info("stats", "packets_per_sec", packetsPerSec)
+				in.packetCount.Store(0)
+			}
+
+		default:
+		}
+
 		n, err := in.conn.Read(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
@@ -98,6 +116,8 @@ func (in *UDPIngress) Run(ctx context.Context) {
 		if err := in.out.Write(ctx, buf); err != nil {
 			in.l.Warn("failed to write into output connector", "reason", err)
 		}
+
+		in.packetCount.Add(1)
 	}
 }
 
