@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/squadracorsepolito/acmetel"
-	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/core"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
@@ -18,46 +15,31 @@ func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	rb := internal.NewRingBuffer[[]byte](1024)
+	ingressToPreProc := internal.NewRingBuffer[[]byte](2048)
+	preProcToProc := internal.NewRingBuffer[*core.Message](4096)
 
-	server := acmetel.NewServerUDP(rb, acmetel.NewDefaultServerUDPConfig())
+	ingress := acmetel.NewUDPIngress(acmetel.NewDefaultUDPIngressConfig())
+	ingress.SetOutput(ingressToPreProc)
 
-	cannelloniPreprocessor := cannelloni.NewPreprocessor(rb)
+	preProc := acmetel.NewCannelloniPreProcessor()
+	preProc.SetInput(ingressToPreProc)
+	preProc.SetOutput(preProcToProc)
 
-	msgCh := make(chan *core.Message, 32)
+	proc := acmetel.NewProcessor()
+	proc.SetInput(preProcToProc)
 
-	wg := sync.WaitGroup{}
-	wg.Add(3)
+	pipeline := acmetel.NewPipeline()
 
-	go func() {
-		cannelloniPreprocessor.Run(ctx, msgCh)
-		wg.Done()
-	}()
+	pipeline.AddStage(ingress)
+	pipeline.AddStage(preProc)
+	pipeline.AddStage(proc)
 
-	go func() {
-	loop:
-		for {
-			select {
-			case <-ctx.Done():
-				break loop
+	if err := pipeline.Init(ctx); err != nil {
+		panic(err)
+	}
 
-			case msg := <-msgCh:
-				log.Print(msg)
-			}
-		}
-
-		wg.Done()
-	}()
-
-	go func() {
-		if err := server.Run(ctx); err != nil {
-			log.Print(err)
-		}
-		wg.Done()
-	}()
+	go pipeline.Run(ctx)
+	defer pipeline.Stop()
 
 	<-ctx.Done()
-
-	close(msgCh)
-	wg.Wait()
 }

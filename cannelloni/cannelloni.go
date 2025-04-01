@@ -38,6 +38,10 @@ func NewFrame(sequenceNumber uint8, messageCount uint16) *Frame {
 }
 
 func DecodeFrame(buf []byte) (*Frame, error) {
+	if buf == nil {
+		return nil, errors.New("nil buffer")
+	}
+
 	if len(buf) < 5 {
 		return nil, errors.New("not enough data")
 	}

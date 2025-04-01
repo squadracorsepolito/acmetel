@@ -19,21 +19,21 @@ func Test_RingBuffer_Put(t *testing.T) {
 	for idx, ch := range str1 {
 		itemIn[idx] = ch
 	}
-	rb.Put(ctx, itemIn)
+	rb.Write(ctx, itemIn)
 
 	str2 := []byte("world")
 	itemIn = make([]byte, 8)
 	for idx, ch := range str2 {
 		itemIn[idx] = ch
 	}
-	rb.Put(ctx, itemIn)
+	rb.Write(ctx, itemIn)
 
-	itemOut, _ := rb.Get(ctx)
+	itemOut, _ := rb.Read(ctx)
 	for idx, ch := range str1 {
 		assert.Equal(ch, itemOut[idx])
 	}
 
-	itemOut, _ = rb.Get(ctx)
+	itemOut, _ = rb.Read(ctx)
 	for idx, ch := range str2 {
 		assert.Equal(ch, itemOut[idx])
 	}
@@ -53,8 +53,8 @@ func Benchmark_RingBuffer(b *testing.B) {
 		item[2] = 'l'
 		item[3] = 'l'
 		item[4] = 'o'
-		rb.Put(ctx, item)
+		rb.Write(ctx, item)
 
-		rb.Get(ctx)
+		rb.Read(ctx)
 	}
 }

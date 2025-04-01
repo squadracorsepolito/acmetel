@@ -3,7 +3,6 @@ package main
 import (
 	"net"
 	"net/netip"
-	"time"
 
 	"github.com/squadracorsepolito/acmetel/cannelloni"
 )
@@ -23,12 +22,12 @@ func main() {
 		f.AddMessage(msg)
 	}
 
-	for range 1000 {
+	for range 10000000 {
 		_, err = conn.Write(f.Encode())
 		if err != nil {
 			panic(err)
 		}
-		time.Sleep(time.Millisecond * 10)
+		// time.Sleep(time.Millisecond * 10)
 
 		f.SequenceNumber++
 	}
