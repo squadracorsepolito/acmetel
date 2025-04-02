@@ -3,24 +3,26 @@ package acmetel
 import (
 	"context"
 	"errors"
-	"sync/atomic"
-	"time"
 
 	"github.com/squadracorsepolito/acmetel/core"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
 type Processor struct {
+	*stats
+
 	l *logger
 
 	in *internal.RingBuffer[*core.Message]
-
-	msgCount atomic.Uint64
 }
 
 func NewProcessor() *Processor {
+	l := newLogger(stageKindProcessor, "processor")
+
 	return &Processor{
-		l: newLogger(stageKindProcessor, "processor"),
+		stats: newStats(l),
+
+		l: l,
 	}
 }
 
@@ -33,25 +35,15 @@ func (p *Processor) Init(ctx context.Context) error {
 }
 
 func (p *Processor) Run(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
 	p.l.Info("starting run")
 	defer p.l.Info("quitting run")
+
+	go p.runStats(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-
-		case <-ticker.C:
-			msgPerSec := p.msgCount.Load()
-			if msgPerSec == 0 {
-				continue
-			}
-
-			p.l.Info("stats", "msg_per_sec", msgPerSec)
-			p.msgCount.Store(0)
 
 		default:
 		}
@@ -61,6 +53,8 @@ func (p *Processor) Run(ctx context.Context) {
 			p.l.Warn("failed to read from input connector", "reason", err)
 			continue
 		}
+
+		p.incrementItemCount()
 
 		p.process(ctx, msg)
 	}
@@ -74,7 +68,6 @@ func (p *Processor) SetInput(connector *internal.RingBuffer[*core.Message]) {
 
 func (p *Processor) process(_ context.Context, _ *core.Message) {
 	// p.l.Info("processing message", "message", msg.String())
-	p.msgCount.Add(1)
 }
 
 // type processorWorker struct {

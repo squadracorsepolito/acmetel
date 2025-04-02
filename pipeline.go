@@ -67,5 +67,9 @@ func (p *Pipeline) Run(ctx context.Context) {
 }
 
 func (p *Pipeline) Stop() {
+	for _, stage := range p.stages {
+		stage.Stop()
+	}
+
 	p.wg.Wait()
 }

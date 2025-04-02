@@ -9,6 +9,7 @@ type logger struct {
 
 	stageKind stageKind
 	stageName string
+	stageID   int
 }
 
 func newLogger(stageKind stageKind, stageName string) *logger {
@@ -17,11 +18,17 @@ func newLogger(stageKind stageKind, stageName string) *logger {
 
 		stageKind: stageKind,
 		stageName: stageName,
+
+		stageID: 0,
 	}
 }
 
+func (l *logger) SetStageID(id int) {
+	l.stageID = id
+}
+
 func (l *logger) getArgs(args []any) []any {
-	return append([]any{"stage_kind", l.stageKind, "stage_name", l.stageName}, args...)
+	return append([]any{"stage_kind", l.stageKind, "stage_name", l.stageName, "stage_id", l.stageID}, args...)
 }
 
 func (l *logger) Info(msg string, args ...any) {

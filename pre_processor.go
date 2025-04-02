@@ -3,7 +3,6 @@ package acmetel
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"github.com/squadracorsepolito/acmelib"
@@ -13,17 +12,21 @@ import (
 )
 
 type CannelloniPreProcessor struct {
+	*stats
+
 	l *logger
 
 	in  *internal.RingBuffer[[]byte]
 	out *internal.RingBuffer[*core.Message]
-
-	frameCount atomic.Uint64
 }
 
 func NewCannelloniPreProcessor() *CannelloniPreProcessor {
+	l := newLogger(stageKindPreProcessor, "cannelloni-pre-processor")
+
 	return &CannelloniPreProcessor{
-		l: newLogger(stageKindPreProcessor, "cannelloni-pre-processor"),
+		stats: newStats(l),
+
+		l: l,
 	}
 }
 
@@ -45,20 +48,12 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 	p.l.Info("starting run")
 	defer p.l.Info("quitting run")
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	go p.stats.runStats(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-
-		case <-ticker.C:
-			framePerSec := p.frameCount.Load()
-			if framePerSec != 0 {
-				p.l.Info("stats", "frame_per_sec", framePerSec)
-				p.frameCount.Store(0)
-			}
 
 		default:
 		}
@@ -68,6 +63,9 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 			p.l.Warn("failed to read from input connector", "reason", err)
 			continue
 		}
+
+		p.incrementItemCount()
+		p.incrementByteCountBy(len(buf))
 
 		f, err := cannelloni.DecodeFrame(buf)
 		if err != nil {
@@ -83,12 +81,23 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 				p.l.Warn("failed to write into output connector", "reason", err)
 			}
 		}
-
-		p.frameCount.Add(1)
 	}
 }
 
 func (p *CannelloniPreProcessor) Stop() {}
+
+func (p *CannelloniPreProcessor) Duplicate() ScalableStage {
+	dup := NewCannelloniPreProcessor()
+
+	dup.in = p.in
+	dup.out = p.out
+
+	return dup
+}
+
+func (p *CannelloniPreProcessor) SetID(id int) {
+	p.l.SetStageID(id)
+}
 
 func (p *CannelloniPreProcessor) SetInput(connector *internal.RingBuffer[[]byte]) {
 	p.in = connector
