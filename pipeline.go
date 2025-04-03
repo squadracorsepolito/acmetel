@@ -19,6 +19,12 @@ type Stage interface {
 	Stop()
 }
 
+type Connector[T any] interface {
+	Write(item T) error
+	Read() (T, error)
+	Close()
+}
+
 type Pipeline struct {
 	stages []Stage
 

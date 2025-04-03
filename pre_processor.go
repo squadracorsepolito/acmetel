@@ -2,13 +2,11 @@ package acmetel
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/core"
-	"github.com/squadracorsepolito/acmetel/internal"
 )
 
 type CannelloniPreProcessor struct {
@@ -16,8 +14,8 @@ type CannelloniPreProcessor struct {
 
 	l *logger
 
-	in  *internal.RingBuffer[[]byte]
-	out *internal.RingBuffer[*core.Message]
+	in  Connector[[2048]byte]
+	out Connector[core.Message]
 }
 
 func NewCannelloniPreProcessor() *CannelloniPreProcessor {
@@ -31,16 +29,6 @@ func NewCannelloniPreProcessor() *CannelloniPreProcessor {
 }
 
 func (p *CannelloniPreProcessor) Init(ctx context.Context) error {
-	if p.out == nil {
-		return errors.New("output connector not set")
-	}
-
-	p.out.Init(ctx)
-
-	if p.in == nil {
-		return errors.New("input connector not set")
-	}
-
 	return nil
 }
 
@@ -58,7 +46,7 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 		default:
 		}
 
-		buf, err := p.in.Read(ctx)
+		buf, err := p.in.Read()
 		if err != nil {
 			p.l.Warn("failed to read from input connector", "reason", err)
 			continue
@@ -67,7 +55,7 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 		p.incrementItemCount()
 		p.incrementByteCountBy(len(buf))
 
-		f, err := cannelloni.DecodeFrame(buf)
+		f, err := cannelloni.DecodeFrame(buf[:])
 		if err != nil {
 			p.l.Warn("failed to decode frame", "reason", err)
 			continue
@@ -77,14 +65,16 @@ func (p *CannelloniPreProcessor) Run(ctx context.Context) {
 		for _, msg := range f.Messages {
 			tmpMsg := core.NewMessage(timestamp, acmelib.CANID(msg.CANID), int(msg.DataLen), msg.Data)
 
-			if err := p.out.Write(ctx, tmpMsg); err != nil {
+			if err := p.out.Write(*tmpMsg); err != nil {
 				p.l.Warn("failed to write into output connector", "reason", err)
 			}
 		}
 	}
 }
 
-func (p *CannelloniPreProcessor) Stop() {}
+func (p *CannelloniPreProcessor) Stop() {
+	p.out.Close()
+}
 
 func (p *CannelloniPreProcessor) Duplicate() ScalableStage {
 	dup := NewCannelloniPreProcessor()
@@ -96,13 +86,13 @@ func (p *CannelloniPreProcessor) Duplicate() ScalableStage {
 }
 
 func (p *CannelloniPreProcessor) SetID(id int) {
-	p.l.SetStageID(id)
+	p.l.SetID(id)
 }
 
-func (p *CannelloniPreProcessor) SetInput(connector *internal.RingBuffer[[]byte]) {
+func (p *CannelloniPreProcessor) SetInput(connector Connector[[2048]byte]) {
 	p.in = connector
 }
 
-func (p *CannelloniPreProcessor) SetOutput(connector *internal.RingBuffer[*core.Message]) {
+func (p *CannelloniPreProcessor) SetOutput(connector Connector[core.Message]) {
 	p.out = connector
 }

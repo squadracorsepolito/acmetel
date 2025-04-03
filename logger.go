@@ -7,28 +7,28 @@ var defaultLogger = slog.Default()
 type logger struct {
 	*slog.Logger
 
-	stageKind stageKind
-	stageName string
-	stageID   int
+	kind stageKind
+	name string
+	id   int
 }
 
 func newLogger(stageKind stageKind, stageName string) *logger {
 	return &logger{
 		Logger: slog.Default(),
 
-		stageKind: stageKind,
-		stageName: stageName,
+		kind: stageKind,
+		name: stageName,
 
-		stageID: 0,
+		id: 0,
 	}
 }
 
-func (l *logger) SetStageID(id int) {
-	l.stageID = id
+func (l *logger) SetID(id int) {
+	l.id = id
 }
 
 func (l *logger) getArgs(args []any) []any {
-	return append([]any{"stage_kind", l.stageKind, "stage_name", l.stageName, "stage_id", l.stageID}, args...)
+	return append([]any{"kind", l.kind, "name", l.name, "id", l.id}, args...)
 }
 
 func (l *logger) Info(msg string, args ...any) {

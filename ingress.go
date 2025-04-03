@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-
-	"github.com/squadracorsepolito/acmetel/internal"
 )
 
 type UDPIngress struct {
@@ -19,7 +17,7 @@ type UDPIngress struct {
 	addr *net.UDPAddr
 	conn *net.UDPConn
 
-	out *internal.RingBuffer[[]byte]
+	out Connector[[2048]byte]
 }
 
 type UDPIngressConfig struct {
@@ -51,12 +49,6 @@ func NewUDPIngress(cfg *UDPIngressConfig) *UDPIngress {
 }
 
 func (in *UDPIngress) Init(ctx context.Context) error {
-	if in.out == nil {
-		return errors.New("output connector not set")
-	}
-
-	in.out.Init(ctx)
-
 	conn, err := net.ListenUDP("udp", in.addr)
 	if err != nil {
 		return err
@@ -73,15 +65,50 @@ func (in *UDPIngress) Run(ctx context.Context) {
 		in.conn.Close()
 	}()
 
-	buf := make([]byte, in.cfg.BufferSize)
+	buf := [2048]byte{} //make([]byte, in.cfg.BufferSize)
 
 	in.l.Info("starting run")
 	defer in.l.Info("quitting run")
 
 	go in.stats.runStats(ctx)
 
+	count := 0
+	defer func() {
+		in.l.Info("processed frames", "count", count)
+	}()
+
+	// tmp := 8
+	// ch := make(chan []byte, tmp)
+
+	// // rb := NewRingBuffer[[]byte](uint64(tmp * 1000))
+
+	// for i := 0; i < tmp; i++ {
+	// 	go func() {
+	// 		for {
+	// 			select {
+	// 			case <-ctx.Done():
+	// 				return
+	// 			case buf := <-ch:
+	// 				if err := in.out.Write(buf); err != nil {
+	// 					in.l.Warn("failed to write into output connector", "reason", err)
+	// 				}
+	// 				// default:
+	// 			}
+
+	// 			// buf, err := rb.Read()
+	// 			// if err != nil {
+	// 			// 	return
+	// 			// }
+
+	// 			// if err := in.out.Write(buf); err != nil {
+	// 			// 	in.l.Warn("failed to write into output connector", "reason", err)
+	// 			// }
+	// 		}
+	// 	}()
+	// }
+
 	for {
-		n, err := in.conn.Read(buf)
+		n, err := in.conn.Read(buf[:])
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				select {
@@ -98,6 +125,8 @@ func (in *UDPIngress) Run(ctx context.Context) {
 			return
 		}
 
+		count++
+
 		in.incrementItemCount()
 		in.incrementByteCountBy(n)
 
@@ -106,14 +135,20 @@ func (in *UDPIngress) Run(ctx context.Context) {
 			continue
 		}
 
-		if err := in.out.Write(ctx, buf); err != nil {
+		if err := in.out.Write(buf); err != nil {
 			in.l.Warn("failed to write into output connector", "reason", err)
 		}
+
+		// ch <- buf
+		// rb.Write(buf)
 	}
+
 }
 
-func (in *UDPIngress) Stop() {}
+func (in *UDPIngress) Stop() {
+	in.out.Close()
+}
 
-func (in *UDPIngress) SetOutput(connector *internal.RingBuffer[[]byte]) {
+func (in *UDPIngress) SetOutput(connector Connector[[2048]byte]) {
 	in.out = connector
 }

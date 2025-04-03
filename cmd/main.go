@@ -8,15 +8,14 @@ import (
 
 	"github.com/squadracorsepolito/acmetel"
 	"github.com/squadracorsepolito/acmetel/core"
-	"github.com/squadracorsepolito/acmetel/internal"
 )
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	ingressToPreProc := internal.NewRingBuffer[[]byte](2048)
-	preProcToProc := internal.NewRingBuffer[*core.Message](1024)
+	ingressToPreProc := acmetel.NewRingBuffer[[2048]byte](32000)
+	preProcToProc := acmetel.NewRingBuffer[core.Message](32000)
 
 	ingress := acmetel.NewUDPIngress(acmetel.NewDefaultUDPIngressConfig())
 	ingress.SetOutput(ingressToPreProc)
@@ -31,8 +30,8 @@ func main() {
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(ingress)
-	pipeline.AddStage(acmetel.NewScaler(preProc, 4))
-	pipeline.AddStage(proc)
+	pipeline.AddStage(acmetel.NewScaler(preProc, 2))
+	pipeline.AddStage(acmetel.NewScaler(proc, 2))
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)
