@@ -82,32 +82,64 @@ func Test_Channel(t *testing.T) {
 func Benchmark_Connectors(b *testing.B) {
 	b.ReportAllocs()
 
-	connKinds := []string{"channel", "ring_buffer"}
+	connKinds := []string{"channel", "ring_buffer", "ring_buffer_2"}
 	for _, connKind := range connKinds {
 		b.Run("Sequential-"+connKind, func(b *testing.B) {
 			benchmarkConnectorSequential(b, connKind, benchSize, benchDataSize)
 		})
+
+		b.Run("Sequential2-"+connKind, func(b *testing.B) {
+			benchmarkConnectorSequential2(b, connKind, benchSize, benchDataSize)
+		})
 	}
 }
 
-func getConnectorFormKind(connKind string, size uint64) Connector[[]byte] {
-	var connector Connector[[]byte]
+func getConnectorFormKind[T any](connKind string, size uint64) Connector[T] {
+	var connector Connector[T]
 	switch connKind {
 	case "channel":
-		connector = NewChannel[[]byte](size)
+		connector = NewChannel[T](size)
 	case "ring_buffer":
-		connector = NewRingBuffer[[]byte](size)
+		connector = NewRingBuffer[T](size)
+	case "ring_buffer_2":
+		connector = NewRingBuffer2[T](uint32(size))
 	}
 	return connector
 }
 
 func benchmarkConnectorSequential(b *testing.B, connKind string, size uint64, dataSize int) {
-	connector := getConnectorFormKind(connKind, size)
+	connector := getConnectorFormKind[[]byte](connKind, size)
+
 	data := make([]byte, dataSize)
 
 	b.ResetTimer()
 	for b.Loop() {
 		err := connector.Write(data)
+		if err != nil {
+			b.Logf("Write error: %v,", err)
+			return
+		}
+		_, err = connector.Read()
+		if err != nil {
+			b.Logf("Read error: %v", err)
+			return
+		}
+	}
+}
+
+func benchmarkConnectorSequential2(b *testing.B, connKind string, size uint64, dataSize int) {
+	type dummy struct {
+		data []byte
+	}
+
+	connector := getConnectorFormKind[*dummy](connKind, size)
+
+	data := make([]byte, dataSize)
+	d := &dummy{data}
+
+	b.ResetTimer()
+	for b.Loop() {
+		err := connector.Write(d)
 		if err != nil {
 			b.Logf("Write error: %v,", err)
 			return
