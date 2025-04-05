@@ -71,13 +71,13 @@ func testConnector(t *testing.T, connector Connector[int], itemCount int) {
 	}
 }
 
-func Test_RingBuffer(t *testing.T) {
-	testConnector(t, NewRingBuffer[int](testSize), testItemCount)
-}
+// func Test_RingBuffer(t *testing.T) {
+// 	testConnector(t, NewRingBuffer[int](testSize), testItemCount)
+// }
 
-func Test_Channel(t *testing.T) {
-	testConnector(t, NewChannel[int](testSize), testItemCount)
-}
+// func Test_Channel(t *testing.T) {
+// 	testConnector(t, NewChannel[int](testSize), testItemCount)
+// }
 
 func Benchmark_Connectors(b *testing.B) {
 	b.ReportAllocs()

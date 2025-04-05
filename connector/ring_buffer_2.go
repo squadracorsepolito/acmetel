@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/sys/cpu"
 )
 
 const ptrSize = 32
@@ -16,10 +18,13 @@ type slot[T any] struct {
 type RingBuffer2[T any] struct {
 	headTail atomic.Uint64
 
+	_      cpu.CacheLinePad
 	closed atomic.Bool
 
+	_      cpu.CacheLinePad
 	isFull atomic.Bool
 
+	_       cpu.CacheLinePad
 	isEmpty atomic.Bool
 
 	capacity uint32
@@ -68,52 +73,78 @@ func (rb *RingBuffer2[T]) unpack(headTail uint64) (head, tail uint32) {
 }
 
 func (rb *RingBuffer2[T]) push(item T) bool {
-	head, tail := rb.unpack(rb.headTail.Load())
+	for {
+		headTail := rb.headTail.Load()
+		head, tail := rb.unpack(headTail)
 
-	if head-tail >= rb.capacity {
-		// Buffer is full
-		return false
+		if head-tail >= rb.capacity {
+			// Buffer is full
+			return false
+		}
+
+		newHeadTail := rb.pack(head+1, tail)
+		if !rb.headTail.CompareAndSwap(headTail, newHeadTail) {
+			continue
+		}
+
+		slot := &rb.buffer[head&rb.capMask]
+
+		for !slot.busy.CompareAndSwap(false, true) {
+			// Slot is not clean
+			runtime.Gosched()
+		}
+
+		slot.data = item
+
+		return true
 	}
-
-	slot := &rb.buffer[head&rb.capMask]
-
-	if !slot.busy.CompareAndSwap(false, true) {
-		// Slot is not clean
-		return false
-	}
-
-	slot.data = item
-
-	rb.headTail.Add(1 << ptrSize)
-
-	return true
 }
 
-func (rb *RingBuffer2[T]) pop() (T, bool) {
-	var zero T
-	var slot *slot[T]
+// func (rb *RingBuffer2[T]) push(item T) bool {
+// 	head, tail := rb.unpack(rb.headTail.Load())
 
+// 	if head-tail >= rb.capacity {
+// 		// Buffer is full
+// 		return false
+// 	}
+
+// 	slot := &rb.buffer[head&rb.capMask]
+
+// 	if !slot.busy.CompareAndSwap(false, true) {
+// 		// Slot is not clean
+// 		return false
+// 	}
+
+// 	slot.data = item
+
+// 	rb.headTail.Add(1 << ptrSize)
+
+// 	return true
+// }
+
+func (rb *RingBuffer2[T]) pop() (T, bool) {
 	for {
 		headTail := rb.headTail.Load()
 		head, tail := rb.unpack(headTail)
 
 		if head == tail {
 			// Buffer is empty
-			return zero, false
+			return *new(T), false
 		}
 
 		nextHeadTail := rb.pack(head, tail+1)
-		if rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
-			slot = &rb.buffer[tail&rb.capMask]
-			break
+		if !rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
+			continue
 		}
+
+		slot := &rb.buffer[tail&rb.capMask]
+
+		item := slot.data
+
+		slot.busy.Store(false)
+
+		return item, true
 	}
-
-	item := slot.data
-
-	slot.busy.Store(false)
-
-	return item, true
 }
 
 func (rb *RingBuffer2[T]) Write(item T) error {
@@ -150,7 +181,6 @@ func (rb *RingBuffer2[T]) Write(item T) error {
 	}
 
 	// Success
-
 	if rb.isEmpty.Load() {
 		rb.mux.Lock()
 		rb.notEmpty.Signal()
