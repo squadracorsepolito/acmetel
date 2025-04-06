@@ -2,6 +2,7 @@ package connector
 
 import (
 	"errors"
+	"log"
 	"sync"
 	"testing"
 )
@@ -82,7 +83,7 @@ func testConnector(t *testing.T, connector Connector[int], itemCount int) {
 func Benchmark_Connectors(b *testing.B) {
 	b.ReportAllocs()
 
-	connKinds := []string{"channel", "ring_buffer", "ring_buffer_2"}
+	connKinds := []string{"ring_buffer_2"}
 	for _, connKind := range connKinds {
 		b.Run("Sequential-"+connKind, func(b *testing.B) {
 			benchmarkConnectorSequential(b, connKind, benchSize, benchDataSize)
@@ -91,6 +92,10 @@ func Benchmark_Connectors(b *testing.B) {
 		b.Run("Sequential2-"+connKind, func(b *testing.B) {
 			benchmarkConnectorSequential2(b, connKind, benchSize, benchDataSize)
 		})
+
+		// b.Run("Parallel-"+connKind, func(b *testing.B) {
+		// 	benchmarkConnectorParallel(b, connKind, benchSize, benchDataSize, 2, 2)
+		// })
 	}
 }
 
@@ -150,4 +155,66 @@ func benchmarkConnectorSequential2(b *testing.B, connKind string, size uint64, d
 			return
 		}
 	}
+}
+
+func benchmarkConnectorParallel(b *testing.B, connKind string, size uint64, dataSize, writerCount, readerCount int) {
+	type dummy struct {
+		data []byte
+	}
+
+	connector := getConnectorFormKind[*dummy](connKind, size)
+
+	data := &dummy{
+		data: make([]byte, dataSize),
+	}
+
+	readerWg := sync.WaitGroup{}
+	readerWg.Add(readerCount)
+
+	// var itemReadCount atomic.Uint64
+
+	for range readerCount {
+		go func() {
+			defer readerWg.Done()
+
+			for range b.N / readerCount {
+				_, err := connector.Read()
+				if err != nil {
+					b.Logf("Read error: %v", err)
+					return
+				}
+
+				// itemReadCount.Add(1)
+
+				// if itemReadCount.Load() == uint64(b.N) {
+				// 	connector.Close()
+				// }
+			}
+		}()
+	}
+
+	writerWg := sync.WaitGroup{}
+	writerWg.Add(writerCount)
+
+	for range writerCount {
+		go func() {
+			defer writerWg.Done()
+
+			for range b.N / writerCount {
+				err := connector.Write(data)
+				if err != nil {
+					b.Logf("Write error: %v,", err)
+					return
+				}
+			}
+		}()
+	}
+
+	b.ResetTimer()
+
+	writerWg.Wait()
+
+	log.Print("WRITER DONE")
+
+	readerWg.Wait()
 }

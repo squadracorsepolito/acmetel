@@ -11,8 +11,9 @@ import (
 const ptrSize = 32
 
 type slot[T any] struct {
-	busy atomic.Bool
-	data T
+	//busy atomic.Bool
+	dataReady atomic.Bool
+	data      T
 }
 
 type RingBuffer2[T any] struct {
@@ -72,6 +73,59 @@ func (rb *RingBuffer2[T]) unpack(headTail uint64) (head, tail uint32) {
 	return
 }
 
+// func (rb *RingBuffer2[T]) push(item T) bool {
+// 	for {
+// 		headTail := rb.headTail.Load()
+// 		head, tail := rb.unpack(headTail)
+
+// 		if head-tail >= rb.capacity {
+// 			// Buffer is full
+// 			return false
+// 		}
+
+// 		newHeadTail := rb.pack(head+1, tail)
+// 		if !rb.headTail.CompareAndSwap(headTail, newHeadTail) {
+// 			continue
+// 		}
+
+// 		slot := &rb.buffer[head&rb.capMask]
+
+// 		for !slot.busy.CompareAndSwap(false, true) {
+// 			// Slot is not clean
+// 			runtime.Gosched()
+// 		}
+
+// 		slot.data = item
+
+// 		return true
+// 	}
+// }
+
+// func (rb *RingBuffer2[T]) pop() (T, bool) {
+// 	for {
+// 		headTail := rb.headTail.Load()
+// 		head, tail := rb.unpack(headTail)
+
+// 		if head == tail {
+// 			// Buffer is empty
+// 			return *new(T), false
+// 		}
+
+// 		nextHeadTail := rb.pack(head, tail+1)
+// 		if !rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
+// 			continue
+// 		}
+
+// 		slot := &rb.buffer[tail&rb.capMask]
+
+// 		item := slot.data
+
+// 		slot.busy.Store(false)
+
+// 		return item, true
+// 	}
+// }
+
 func (rb *RingBuffer2[T]) push(item T) bool {
 	for {
 		headTail := rb.headTail.Load()
@@ -82,45 +136,34 @@ func (rb *RingBuffer2[T]) push(item T) bool {
 			return false
 		}
 
-		newHeadTail := rb.pack(head+1, tail)
-		if !rb.headTail.CompareAndSwap(headTail, newHeadTail) {
+		// Get slot and check it's not still being read
+		slotIndex := head & rb.capMask
+		slot := &rb.buffer[slotIndex]
+
+		// If dataReady is true, it means this slot hasn't been consumed yet
+		// Wait until the slot is marked as consumed
+		if slot.dataReady.Load() {
+			runtime.Gosched()
 			continue
 		}
 
-		slot := &rb.buffer[head&rb.capMask]
-
-		for !slot.busy.CompareAndSwap(false, true) {
-			// Slot is not clean
-			runtime.Gosched()
+		// Claim this slot by advancing head pointer
+		newHeadTail := rb.pack(head+1, tail)
+		if !rb.headTail.CompareAndSwap(headTail, newHeadTail) {
+			// Someone else modified the buffer, retry
+			continue
 		}
 
+		// Write the data
 		slot.data = item
+
+		// Mark data as ready AFTER writing
+		// This is the memory barrier consumers will check
+		slot.dataReady.Store(true)
 
 		return true
 	}
 }
-
-// func (rb *RingBuffer2[T]) push(item T) bool {
-// 	head, tail := rb.unpack(rb.headTail.Load())
-
-// 	if head-tail >= rb.capacity {
-// 		// Buffer is full
-// 		return false
-// 	}
-
-// 	slot := &rb.buffer[head&rb.capMask]
-
-// 	if !slot.busy.CompareAndSwap(false, true) {
-// 		// Slot is not clean
-// 		return false
-// 	}
-
-// 	slot.data = item
-
-// 	rb.headTail.Add(1 << ptrSize)
-
-// 	return true
-// }
 
 func (rb *RingBuffer2[T]) pop() (T, bool) {
 	for {
@@ -132,16 +175,30 @@ func (rb *RingBuffer2[T]) pop() (T, bool) {
 			return *new(T), false
 		}
 
-		nextHeadTail := rb.pack(head, tail+1)
-		if !rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
+		// Get slot
+		slotIndex := tail & rb.capMask
+		slot := &rb.buffer[slotIndex]
+
+		// Check if data is actually ready to be read
+		// This is crucial - we must verify the producer has finished writing
+		if !slot.dataReady.Load() {
+			// Data not yet ready, try again
+			runtime.Gosched()
 			continue
 		}
 
-		slot := &rb.buffer[tail&rb.capMask]
+		// Try to claim this slot for reading by advancing tail
+		nextHeadTail := rb.pack(head, tail+1)
+		if !rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
+			// Someone else modified the buffer, retry
+			continue
+		}
 
+		// Read the item
 		item := slot.data
 
-		slot.busy.Store(false)
+		// Mark slot as available for reuse
+		slot.dataReady.Store(false)
 
 		return item, true
 	}
