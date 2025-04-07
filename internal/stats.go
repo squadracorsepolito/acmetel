@@ -1,4 +1,4 @@
-package acmetel
+package internal
 
 import (
 	"context"
@@ -6,20 +6,20 @@ import (
 	"time"
 )
 
-type stats struct {
-	l *logger
+type Stats struct {
+	l *Logger
 
 	itemCount atomic.Uint64
 	byteCount atomic.Uint64
 }
 
-func newStats(l *logger) *stats {
-	return &stats{
+func NewStats(l *Logger) *Stats {
+	return &Stats{
 		l: l,
 	}
 }
 
-func (s *stats) runStats(ctx context.Context) {
+func (s *Stats) RunStats(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -43,10 +43,10 @@ func (s *stats) runStats(ctx context.Context) {
 	}
 }
 
-func (s *stats) incrementItemCount() {
+func (s *Stats) IncrementItemCount() {
 	s.itemCount.Add(1)
 }
 
-func (s *stats) incrementByteCountBy(n int) {
+func (s *Stats) IncrementByteCountBy(n int) {
 	s.byteCount.Add(uint64(n))
 }

@@ -7,31 +7,36 @@ import (
 	"syscall"
 
 	"github.com/squadracorsepolito/acmetel"
-	"github.com/squadracorsepolito/acmetel/core"
+	"github.com/squadracorsepolito/acmetel/adapter"
+	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/ingress"
+	"github.com/squadracorsepolito/acmetel/processor"
 )
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	ingressToPreProc := acmetel.NewRingBuffer[[2048]byte](32000)
-	preProcToProc := acmetel.NewRingBuffer[core.Message](32000)
+	ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](32000)
+	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](32000)
 
-	ingress := acmetel.NewUDPIngress(acmetel.NewDefaultUDPIngressConfig())
-	ingress.SetOutput(ingressToPreProc)
+	ingressCfg := ingress.NewDefaultUDPConfig()
+	ingressCfg.WorkerNum = 5
+	ingress := ingress.NewUDP(ingressCfg)
+	ingress.SetOutput(ingressToAdapter)
 
-	preProc := acmetel.NewCannelloniPreProcessor()
-	preProc.SetInput(ingressToPreProc)
-	preProc.SetOutput(preProcToProc)
+	adapter := adapter.NewCannelloni(&adapter.CannelloniConfig{WorkerNum: 8})
+	adapter.SetInput(ingressToAdapter)
+	adapter.SetOutput(adapterToProc)
 
-	proc := acmetel.NewProcessor()
-	proc.SetInput(preProcToProc)
+	proc := processor.NewProcessor()
+	proc.SetInput(adapterToProc)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(ingress)
-	pipeline.AddStage(acmetel.NewScaler(preProc, 2))
-	pipeline.AddStage(acmetel.NewScaler(proc, 2))
+	pipeline.AddStage(adapter)
+	pipeline.AddStage(proc)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)

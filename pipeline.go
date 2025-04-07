@@ -3,6 +3,8 @@ package acmetel
 import (
 	"context"
 	"sync"
+
+	"github.com/squadracorsepolito/acmetel/connector"
 )
 
 type stageKind string
@@ -19,11 +21,7 @@ type Stage interface {
 	Stop()
 }
 
-type Connector[T any] interface {
-	Write(item T) error
-	Read() (T, error)
-	Close()
-}
+type Connector[T any] = connector.Connector[T]
 
 type Pipeline struct {
 	stages []Stage

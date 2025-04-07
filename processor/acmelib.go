@@ -1,26 +1,26 @@
-package acmetel
+package processor
 
 import (
 	"context"
 
-	"github.com/squadracorsepolito/acmetel/core"
+	"github.com/squadracorsepolito/acmetel/adapter"
+	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/internal"
 )
 
 type Processor struct {
-	*stats
+	l     *internal.Logger
+	stats *internal.Stats
 
-	l *logger
-
-	in Connector[core.Message]
+	in connector.Connector[*adapter.CANMessageBatch]
 }
 
 func NewProcessor() *Processor {
-	l := newLogger(stageKindProcessor, "processor")
+	l := internal.NewLogger("processor", "acmelib")
 
 	return &Processor{
-		stats: newStats(l),
-
-		l: l,
+		l:     l,
+		stats: internal.NewStats(l),
 	}
 }
 
@@ -32,7 +32,7 @@ func (p *Processor) Run(ctx context.Context) {
 	p.l.Info("starting run")
 	defer p.l.Info("quitting run")
 
-	go p.runStats(ctx)
+	go p.stats.RunStats(ctx)
 
 	for {
 		select {
@@ -48,7 +48,7 @@ func (p *Processor) Run(ctx context.Context) {
 			continue
 		}
 
-		p.incrementItemCount()
+		p.stats.IncrementItemCount()
 
 		p.process(ctx, msg)
 	}
@@ -56,22 +56,10 @@ func (p *Processor) Run(ctx context.Context) {
 
 func (p *Processor) Stop() {}
 
-func (p *Processor) SetInput(connector Connector[core.Message]) {
+func (p *Processor) SetInput(connector connector.Connector[*adapter.CANMessageBatch]) {
 	p.in = connector
 }
 
-func (p *Processor) process(_ context.Context, _ core.Message) {
+func (p *Processor) process(_ context.Context, _ *adapter.CANMessageBatch) {
 	// p.l.Info("processing message", "message", msg.String())
-}
-
-func (p *Processor) Duplicate() ScalableStage {
-	dup := NewProcessor()
-
-	dup.in = p.in
-
-	return dup
-}
-
-func (p *Processor) SetID(id int) {
-	p.l.SetID(id)
 }
