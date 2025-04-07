@@ -5,191 +5,319 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/sys/cpu"
 )
 
-var (
-	// ErrBufferFull is returned when a write operation fails because the buffer is full
-	ErrBufferFull = errors.New("ring buffer: buffer is full")
-	// ErrClosed is returned when operations are attempted on a closed buffer
-	ErrClosed = errors.New("ring buffer: buffer is closed")
-	// ErrBufferEmpty is returned when a non-blocking read operation finds no data
-	ErrBufferEmpty = errors.New("ring buffer: buffer is empty")
-)
+var ErrClosed = errors.New("ring buffer: buffer is closed")
 
-// RingBuffer is a generic lock-free ring buffer implementation
-type RingBuffer[T any] struct {
-	buffer   []T
-	mask     uint64
-	readIdx  atomic.Uint64 // index for reading from the buffer
-	writeIdx atomic.Uint64 // index for writing to the buffer
-	size     uint64
-	closed   atomic.Bool
-	notEmpty *sync.Cond
-	notFull  *sync.Cond
-	mu       sync.Mutex // Mutex for conditions
-
-	isFull  atomic.Bool
-	isEmpty atomic.Bool
+type slot[T any] struct {
+	dataReady atomic.Bool
+	data      T
 }
 
-// NewRingBuffer creates a new RingBuffer with the given capacity.
-// The capacity will be rounded up to the next power of 2.
-func NewRingBuffer[T any](capacity uint64) *RingBuffer[T] {
-	// Round capacity to the next power of 2
+type RingBuffer[T any] struct {
+	// headTail is a uint64 where the top 32 bits are head and the bottom 32 bits are tail.
+	// This allows us to atomically read both head and tail in a single load.
+	headTail atomic.Uint64
+
+	// used to avoid false sharing
+	_ cpu.CacheLinePad
+
+	// closed is used to indicate that the buffer is closed.
+	closed atomic.Bool
+
+	_ cpu.CacheLinePad
+
+	// isFull is used to indicate that the buffer is full.
+	isFull atomic.Bool
+
+	_ cpu.CacheLinePad
+
+	// isEmpty is used to indicate that the buffer is empty.
+	isEmpty atomic.Bool
+
+	_ cpu.CacheLinePad
+
+	capacity     uint32
+	capMask      uint32
+	headTailMask uint64
+
+	// notEmpty and notFull are used to signal that the buffer is not empty or full
+	notEmpty *sync.Cond
+	notFull  *sync.Cond
+	mux      *sync.Mutex
+
+	// buffer is a ring buffer of slots
+	buffer []slot[T]
+}
+
+func NewRingBuffer[T any](capacity uint32) *RingBuffer[T] {
 	capacity--
 	capacity |= capacity >> 1
 	capacity |= capacity >> 2
 	capacity |= capacity >> 4
 	capacity |= capacity >> 8
 	capacity |= capacity >> 16
-	capacity |= capacity >> 32
 	capacity++
 
-	rb := &RingBuffer[T]{
-		buffer: make([]T, capacity),
-		mask:   capacity - 1,
-		size:   capacity,
+	mux := &sync.Mutex{}
+
+	return &RingBuffer[T]{
+		capacity: capacity,
+		capMask:  capacity - 1,
+
+		buffer: make([]slot[T], capacity),
+
+		headTailMask: 1<<32 - 1,
+
+		mux:      mux,
+		notEmpty: sync.NewCond(mux),
+		notFull:  sync.NewCond(mux),
 	}
-
-	// Initialize condition variables
-	rb.notEmpty = sync.NewCond(&rb.mu)
-	rb.notFull = sync.NewCond(&rb.mu)
-
-	return rb
 }
 
-// Write adds an item to the buffer.
-// It returns ErrBufferFull if the buffer is full and no space becomes available.
-// This method blocks until space is available or the buffer is closed.
-func (rb *RingBuffer[T]) Write(item T) error {
-	for {
-		if rb.closed.Load() {
-			return ErrClosed
-		}
+func (rb *RingBuffer[T]) pack(head, tail uint32) uint64 {
+	const mask = 1<<32 - 1
+	return (uint64(head)<<32 | uint64(tail&mask))
+}
 
-		readIdx := rb.readIdx.Load()
-		writeIdx := rb.writeIdx.Load()
+func (rb *RingBuffer[T]) unpack(headTail uint64) (head, tail uint32) {
+	const mask = 1<<32 - 1
+	head = uint32((headTail >> 32) & mask)
+	tail = uint32(headTail & mask)
+	return
+}
+
+func (rb *RingBuffer[T]) push(item T) bool {
+	for {
+		// Load head and tail
+		headTail := rb.headTail.Load()
+		head, tail := rb.unpack(headTail)
 
 		// Check if buffer is full
-		if writeIdx-readIdx >= rb.size {
+		if head-tail >= rb.capacity {
+			// Buffer is full
+			return false
+		}
 
-			// Buffer is full, wait for space
-			rb.mu.Lock()
+		// Get slot and check it's not still being read
+		slotIndex := head & rb.capMask
+		slot := &rb.buffer[slotIndex]
 
-			rb.isFull.Store(true)
+		// If dataReady is true, it means this slot hasn't been consumed yet
+		if slot.dataReady.Load() {
+			// Someone else is reading this slot, retry
+			runtime.Gosched()
+			continue
+		}
 
+		// Claim this slot by advancing head pointer
+		newHeadTail := rb.pack(head+1, tail)
+		if !rb.headTail.CompareAndSwap(headTail, newHeadTail) {
+			// Someone else modified the buffer, retry
+			runtime.Gosched()
+			continue
+		}
+
+		// Write the data
+		slot.data = item
+
+		// Mark data as ready
+		slot.dataReady.Store(true)
+
+		return true
+	}
+}
+
+func (rb *RingBuffer[T]) pop() (T, bool) {
+	for {
+		// Load head and tail
+		headTail := rb.headTail.Load()
+		head, tail := rb.unpack(headTail)
+
+		// Check if buffer is empty
+		if head == tail {
+			// Buffer is empty
+			return *new(T), false
+		}
+
+		// Get slot
+		slotIndex := tail & rb.capMask
+		slot := &rb.buffer[slotIndex]
+
+		// Check if data is actually ready to be read
+		if !slot.dataReady.Load() {
+			// Data not yet ready, retry
+			runtime.Gosched()
+			continue
+		}
+
+		// Try to claim this slot for reading by advancing tail
+		nextHeadTail := rb.pack(head, tail+1)
+		if !rb.headTail.CompareAndSwap(headTail, nextHeadTail) {
+			// Someone else modified the buffer, retry
+			runtime.Gosched()
+			continue
+		}
+
+		// Read the item
+		item := slot.data
+
+		// Mark slot as available for reuse
+		slot.dataReady.Store(false)
+
+		return item, true
+	}
+}
+
+// Write adds an item to the [RingBuffer].
+// It blocks until the buffer is not full.
+//
+// Returns [ErrClosed] if the [RingBuffer] is closed.
+func (rb *RingBuffer[T]) Write(item T) error {
+	// Check if buffer is closed
+	if rb.closed.Load() {
+		return ErrClosed
+	}
+
+	// Try to push the item
+	if rb.push(item) {
+		goto cleanup
+	}
+
+	// The buffer is full, yield to other goroutines
+	runtime.Gosched()
+
+	// Try to push the item
+	for !rb.push(item) {
+		// Buffer is still full, yield to other goroutines
+		runtime.Gosched()
+
+		// Retry to push the item
+		if rb.push(item) {
+			goto cleanup
+		}
+
+		// Buffer is still full, try to mark it as full
+		if !rb.isFull.CompareAndSwap(false, true) {
+			// If the buffer is closed, return
 			if rb.closed.Load() {
-				rb.isFull.Store(false)
-				rb.mu.Unlock()
 				return ErrClosed
 			}
 
-			rb.notFull.Wait()
-
-			rb.isFull.Store(false)
-
-			rb.mu.Unlock()
-
 			continue
 		}
 
-		// Try to write at the current writeIdx position
-		if rb.writeIdx.CompareAndSwap(writeIdx, writeIdx+1) {
-			// We got the slot, write the item
-			rb.buffer[writeIdx&rb.mask] = item
+		// Buffer is full, wait for space
+		rb.mux.Lock()
 
-			// Signal that buffer is not empty
-
-			if rb.isEmpty.Load() {
-				rb.mu.Lock()
-				rb.notEmpty.Signal()
-				rb.mu.Unlock()
-			}
-
-			return nil
+		// Check if buffer is closed
+		if rb.closed.Load() {
+			rb.mux.Unlock()
+			return ErrClosed
 		}
 
-		// CAS failed, another writer got here first - yield and retry
-		runtime.Gosched()
+		// Wait for space
+		rb.notFull.Wait()
+
+		// Someone signaled the buffer as not full, mark it as not full
+		rb.isFull.Store(false)
+		rb.mux.Unlock()
 	}
+
+cleanup:
+	// Check if buffer is empty
+	if rb.isEmpty.Load() {
+		// Signal buffer as not empty to other goroutines
+		rb.mux.Lock()
+		rb.notEmpty.Signal()
+		rb.mux.Unlock()
+	}
+
+	return nil
 }
 
-// Read retrieves and removes an item from the buffer.
-// It blocks until an item is available or the buffer is closed.
+// Read retrieves an item from the [RingBuffer].
+// It blocks until the buffer is not empty.
+//
+// Returns [ErrClosed] if the [RingBuffer] is closed.
 func (rb *RingBuffer[T]) Read() (T, error) {
-	var zero T
+	var item T
+	var popOk bool
 
+	// Try to pop an item
+	item, popOk = rb.pop()
+	if popOk {
+		goto cleanup
+	}
+
+	// The buffer is empty, yield to other goroutines
+	runtime.Gosched()
+
+	// Try to pop an item
 	for {
-		readIdx := rb.readIdx.Load()
-		writeIdx := rb.writeIdx.Load()
+		item, popOk = rb.pop()
+		if popOk {
+			goto cleanup
+		}
 
-		// Check if buffer is empty
-		if readIdx >= writeIdx {
+		// Buffer is still empty, yield to other goroutines
+		runtime.Gosched()
+
+		// Retry to pop an item
+		item, popOk = rb.pop()
+		if popOk {
+			goto cleanup
+		}
+
+		// Buffer is still empty, try to mark it as empty
+		if !rb.isEmpty.CompareAndSwap(false, true) {
+			// If the buffer is closed, return
 			if rb.closed.Load() {
-				return zero, ErrClosed
+				return *new(T), ErrClosed
 			}
-
-			// Buffer is empty, wait for data
-			rb.mu.Lock()
-			rb.isEmpty.Store(true)
-
-			if rb.closed.Load() {
-				rb.isEmpty.Store(false)
-				rb.mu.Unlock()
-				return zero, ErrClosed
-			}
-
-			rb.notEmpty.Wait()
-			rb.isEmpty.Store(false)
-
-			rb.mu.Unlock()
 
 			continue
 		}
 
-		// Try to claim the item at the current readIdx position
-		if rb.readIdx.CompareAndSwap(readIdx, readIdx+1) {
-			// We got the slot, read the item
-			item := rb.buffer[readIdx&rb.mask]
+		// Buffer is empty, wait for data
+		rb.mux.Lock()
 
-			// Signal that buffer is not full
-
-			if rb.isFull.Load() {
-				rb.mu.Lock()
-				rb.notFull.Signal()
-				rb.mu.Unlock()
-			}
-
-			return item, nil
+		// Check if buffer is closed
+		if rb.closed.Load() {
+			rb.mux.Unlock()
+			return item, ErrClosed
 		}
 
-		// CAS failed, another reader got here first - yield and retry
-		runtime.Gosched()
+		// Wait for data
+		rb.notEmpty.Wait()
+
+		// Someone signaled the buffer as not empty, mark it as not empty
+		rb.isEmpty.Store(false)
+		rb.mux.Unlock()
 	}
+
+cleanup:
+	// Check if buffer is full
+	if rb.isFull.Load() {
+		// Signal buffer as not full to other goroutines
+		rb.mux.Lock()
+		rb.notFull.Signal()
+		rb.mux.Unlock()
+	}
+
+	return item, nil
 }
 
-// Close marks the buffer as closed. No further writes will be accepted.
-// Readers can still drain the buffer.
+// Close marks the [RingBuffer] as closed.
 func (rb *RingBuffer[T]) Close() {
 	if !rb.closed.CompareAndSwap(false, true) {
 		return
 	}
 
-	// Signal waiting goroutines to check the closed flag
-	rb.mu.Lock()
+	rb.mux.Lock()
 	rb.notEmpty.Broadcast()
 	rb.notFull.Broadcast()
-	rb.mu.Unlock()
-}
-
-// Len returns the current number of items in the buffer
-func (rb *RingBuffer[T]) Len() uint64 {
-	readIdx := rb.readIdx.Load()
-	writeIdx := rb.writeIdx.Load()
-	return writeIdx - readIdx
-}
-
-// Cap returns the capacity of the buffer
-func (rb *RingBuffer[T]) Cap() uint64 {
-	return rb.size
+	rb.mux.Unlock()
 }
