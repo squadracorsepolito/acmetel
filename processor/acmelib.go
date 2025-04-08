@@ -2,37 +2,82 @@ package processor
 
 import (
 	"context"
+	"sync"
 
 	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
-type Processor struct {
+type AcmelibConfig struct {
+	WorkerNum   int
+	ChannelSize int
+}
+
+func NewDefaultAcmelibConfig() *AcmelibConfig {
+	return &AcmelibConfig{
+		WorkerNum:   1,
+		ChannelSize: 8,
+	}
+}
+
+type Acmelib struct {
 	l     *internal.Logger
 	stats *internal.Stats
 
 	in connector.Connector[*adapter.CANMessageBatch]
+
+	writerWg *sync.WaitGroup
+
+	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, int]
 }
 
-func NewProcessor() *Processor {
+func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
 	l := internal.NewLogger("processor", "acmelib")
 
-	return &Processor{
+	return &Acmelib{
 		l:     l,
 		stats: internal.NewStats(l),
+
+		writerWg: &sync.WaitGroup{},
+
+		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newAcmelibWorkerGen(l)),
 	}
 }
 
-func (p *Processor) Init(ctx context.Context) error {
+func (a *Acmelib) Init(ctx context.Context) error {
 	return nil
 }
 
-func (p *Processor) Run(ctx context.Context) {
-	p.l.Info("starting run")
-	defer p.l.Info("quitting run")
+func (a *Acmelib) runWriter(ctx context.Context) {
+	a.writerWg.Add(1)
+	defer a.writerWg.Done()
 
-	go p.stats.RunStats(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.workerPool.OutputCh:
+			// TODO! write to next stage
+		}
+	}
+}
+
+func (a *Acmelib) Run(ctx context.Context) {
+	a.l.Info("running")
+
+	received := 0
+	skipped := 0
+	defer func() {
+		a.l.Info("received frames", "count", received)
+		a.l.Info("skipped frames", "count", skipped)
+	}()
+
+	go a.stats.RunStats(ctx)
+
+	go a.workerPool.Run(ctx)
+
+	go a.runWriter(ctx)
 
 	for {
 		select {
@@ -42,24 +87,49 @@ func (p *Processor) Run(ctx context.Context) {
 		default:
 		}
 
-		msg, err := p.in.Read()
+		msgBatch, err := a.in.Read()
 		if err != nil {
-			p.l.Warn("failed to read from input connector", "reason", err)
+			a.l.Warn("failed to read from input connector", "reason", err)
 			continue
 		}
 
-		p.stats.IncrementItemCount()
+		a.stats.IncrementItemCount()
 
-		p.process(ctx, msg)
+		received++
+
+		select {
+		case a.workerPool.InputCh <- msgBatch:
+		default:
+			skipped++
+		}
 	}
 }
 
-func (p *Processor) Stop() {}
+func (a *Acmelib) Stop() {
+	defer a.l.Info("stopped")
 
-func (p *Processor) SetInput(connector connector.Connector[*adapter.CANMessageBatch]) {
-	p.in = connector
+	a.workerPool.Stop()
+	a.writerWg.Wait()
 }
 
-func (p *Processor) process(_ context.Context, _ *adapter.CANMessageBatch) {
-	// p.l.Info("processing message", "message", msg.String())
+func (a *Acmelib) SetInput(connector connector.Connector[*adapter.CANMessageBatch]) {
+	a.in = connector
+}
+
+type acmelibWorker struct {
+	*internal.BaseWorker
+}
+
+func newAcmelibWorkerGen(l *internal.Logger) internal.WorkerGen[*adapter.CANMessageBatch, int] {
+	return func() internal.Worker[*adapter.CANMessageBatch, int] {
+		return &acmelibWorker{
+			BaseWorker: internal.NewBaseWorker(l),
+		}
+	}
+}
+
+func (w *acmelibWorker) DoWork(_ context.Context, msgBatch *adapter.CANMessageBatch) (int, error) {
+	adapter.CANMessageBatchPoolInstance.Put(msgBatch)
+
+	return 0, nil
 }

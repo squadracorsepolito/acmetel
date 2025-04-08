@@ -37,7 +37,7 @@ func main() {
 		}
 
 		if i%1000 == 0 {
-			time.Sleep(time.Millisecond * 10)
+			// time.Sleep(time.Millisecond * 10)
 		}
 
 		// f.SequenceNumber++

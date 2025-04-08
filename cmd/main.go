@@ -17,19 +17,20 @@ func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](32000)
-	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](32000)
+	ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](16_000)
+	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](16_000)
 
 	ingressCfg := ingress.NewDefaultUDPConfig()
-	ingressCfg.WorkerNum = 5
+	ingressCfg.WorkerNum = 8
+	ingressCfg.ChannelSize = 1024
 	ingress := ingress.NewUDP(ingressCfg)
 	ingress.SetOutput(ingressToAdapter)
 
-	adapter := adapter.NewCannelloni(&adapter.CannelloniConfig{WorkerNum: 8})
+	adapter := adapter.NewCannelloni(&adapter.CannelloniConfig{WorkerNum: 8, ChannelSize: 1024})
 	adapter.SetInput(ingressToAdapter)
 	adapter.SetOutput(adapterToProc)
 
-	proc := processor.NewProcessor()
+	proc := processor.NewAcmelib(&processor.AcmelibConfig{WorkerNum: 4, ChannelSize: 512})
 	proc.SetInput(adapterToProc)
 
 	pipeline := acmetel.NewPipeline()

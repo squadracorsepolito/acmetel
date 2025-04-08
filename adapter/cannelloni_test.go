@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-// 301087              3968 ns/op            5032 B/op        115 allocs/op
-func Benchmark_Cannelloni_decodeFrame(b *testing.B) {
+func Benchmark_cannelloniWorker_decodeFrame(b *testing.B) {
 	b.ReportAllocs()
 
-	adapter := NewCannelloni(DefaultCannelloniConfig())
+	adapter := &cannelloniWorker{}
 	frame := getCannelloniEncodedFrame()
 
 	b.ResetTimer()

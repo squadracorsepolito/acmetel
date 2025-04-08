@@ -11,23 +11,53 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
+const (
+	defaultUDPPayloadSize = 1474
+)
+
 type UDPData struct {
 	Frame []byte
 }
 
+type UDPDataPool struct {
+	pool *sync.Pool
+}
+
+var UDPDataPoolInstance = newUDPDataPool()
+
+func newUDPDataPool() *UDPDataPool {
+	return &UDPDataPool{
+		pool: &sync.Pool{
+			New: func() any {
+				return &UDPData{
+					Frame: make([]byte, defaultUDPPayloadSize),
+				}
+			},
+		},
+	}
+}
+
+func (p *UDPDataPool) Get() *UDPData {
+	return p.pool.Get().(*UDPData)
+}
+
+func (p *UDPDataPool) Put(d *UDPData) {
+	p.pool.Put(d)
+}
+
 type UDPConfig struct {
-	IPAddr     string
-	Port       uint16
-	BufferSize int
-	WorkerNum  int
+	IPAddr      string
+	Port        uint16
+	WorkerNum   int
+	ChannelSize int
 }
 
 func NewDefaultUDPConfig() *UDPConfig {
 	return &UDPConfig{
-		IPAddr:     "127.0.0.1",
-		Port:       20_000,
-		BufferSize: 2048,
-		WorkerNum:  1,
+		IPAddr:      "127.0.0.1",
+		Port:        20_000,
+		WorkerNum:   1,
+		ChannelSize: 8,
 	}
 }
 
@@ -40,12 +70,10 @@ type UDP struct {
 	addr *net.UDPAddr
 	conn *net.UDPConn
 
-	pool *sync.Pool
-	out  connector.Connector[*UDPData]
+	writerWg *sync.WaitGroup
+	out      connector.Connector[*UDPData]
 
-	workerNum int
-	workerWg  *sync.WaitGroup
-	workerCh  chan []byte
+	workerPool *internal.WorkerPool[[]byte, *UDPData]
 }
 
 func NewUDP(cfg *UDPConfig) *UDP {
@@ -59,17 +87,9 @@ func NewUDP(cfg *UDPConfig) *UDP {
 
 		addr: net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr(cfg.IPAddr), cfg.Port)),
 
-		pool: &sync.Pool{
-			New: func() any {
-				return &UDPData{
-					Frame: make([]byte, cfg.BufferSize),
-				}
-			},
-		},
+		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newUDPWorkerGen(l)),
 
-		workerNum: cfg.WorkerNum,
-		workerWg:  &sync.WaitGroup{},
-		workerCh:  make(chan []byte, cfg.WorkerNum*16),
+		writerWg: &sync.WaitGroup{},
 	}
 }
 
@@ -84,36 +104,24 @@ func (i *UDP) Init(ctx context.Context) error {
 	return nil
 }
 
-func (i *UDP) runWorker(ctx context.Context) {
+func (i *UDP) runWriter(ctx context.Context) {
+	i.writerWg.Add(1)
+	defer i.writerWg.Done()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case buf := <-i.workerCh:
-			data := i.pool.Get().(*UDPData)
-			data.Frame = buf
-
+		case data := <-i.workerPool.OutputCh:
 			if err := i.out.Write(data); err != nil {
 				i.l.Warn("failed to write into output connector", "reason", err)
 			}
-
-			i.pool.Put(data)
 		}
 	}
 }
 
 func (i *UDP) Run(ctx context.Context) {
-	go func() {
-		<-ctx.Done()
-		i.conn.Close()
-	}()
-
-	buf := make([]byte, i.cfg.BufferSize)
-
-	i.l.Info("starting run")
-	defer i.l.Info("quitting run")
-
-	go i.stats.RunStats(ctx)
+	i.l.Info("running")
 
 	received := 0
 	skipped := 0
@@ -122,15 +130,18 @@ func (i *UDP) Run(ctx context.Context) {
 		i.l.Info("skipped frames", "count", skipped)
 	}()
 
-	i.workerWg.Add(i.workerNum)
+	go func() {
+		<-ctx.Done()
+		i.conn.Close()
+	}()
 
-	for range i.workerNum {
-		go func() {
-			i.runWorker(ctx)
-			i.workerWg.Done()
-		}()
-	}
+	go i.stats.RunStats(ctx)
 
+	go i.workerPool.Run(ctx)
+
+	go i.runWriter(ctx)
+
+	buf := make([]byte, defaultUDPPayloadSize)
 	for {
 		n, err := i.conn.Read(buf)
 		if err != nil {
@@ -160,7 +171,7 @@ func (i *UDP) Run(ctx context.Context) {
 		}
 
 		select {
-		case i.workerCh <- buf:
+		case i.workerPool.InputCh <- buf:
 		default:
 			skipped++
 		}
@@ -168,12 +179,37 @@ func (i *UDP) Run(ctx context.Context) {
 }
 
 func (i *UDP) Stop() {
-	i.out.Close()
+	defer i.l.Info("stopped")
 
-	i.workerWg.Wait()
-	close(i.workerCh)
+	i.out.Close()
+	i.workerPool.Stop()
+	i.writerWg.Wait()
 }
 
 func (i *UDP) SetOutput(connector connector.Connector[*UDPData]) {
 	i.out = connector
+}
+
+type udpWorker struct {
+	*internal.BaseWorker
+}
+
+func newUDPWorkerGen(l *internal.Logger) internal.WorkerGen[[]byte, *UDPData] {
+	return func() internal.Worker[[]byte, *UDPData] {
+		return &udpWorker{
+			BaseWorker: internal.NewBaseWorker(l),
+		}
+	}
+}
+
+func (w *udpWorker) DoWork(_ context.Context, buf []byte) (*UDPData, error) {
+	// udpData := UDPDataPoolInstance.Get()
+
+	udpData := &UDPData{
+		Frame: make([]byte, len(buf)),
+	}
+
+	copy(udpData.Frame, buf)
+
+	return udpData, nil
 }

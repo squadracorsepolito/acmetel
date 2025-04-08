@@ -17,6 +17,159 @@ const (
 	defaultCANMessageNum = 113
 )
 
+type CANMessage struct {
+	CANID   uint32
+	DataLen int
+	RawData []byte
+}
+
+type CANMessageBatch struct {
+	Timestamp time.Time
+	Messages  []CANMessage
+}
+
+type CANMessageBatchPool struct {
+	pool *sync.Pool
+}
+
+var CANMessageBatchPoolInstance = newCANMessageBatchPool()
+
+func newCANMessageBatchPool() *CANMessageBatchPool {
+	return &CANMessageBatchPool{
+		pool: &sync.Pool{
+			New: func() any {
+				return &CANMessageBatch{
+					Messages: make([]CANMessage, defaultCANMessageNum),
+				}
+			},
+		},
+	}
+}
+
+func (p *CANMessageBatchPool) Get() *CANMessageBatch {
+	return p.pool.Get().(*CANMessageBatch)
+}
+
+func (p *CANMessageBatchPool) Put(b *CANMessageBatch) {
+	p.pool.Put(b)
+}
+
+type CannelloniConfig struct {
+	WorkerNum   int
+	ChannelSize int
+}
+
+func NewDefaultCannelloniConfig() *CannelloniConfig {
+	return &CannelloniConfig{
+		WorkerNum:   1,
+		ChannelSize: 8,
+	}
+}
+
+type Cannelloni struct {
+	l     *internal.Logger
+	stats *internal.Stats
+
+	in connector.Connector[*ingress.UDPData]
+
+	writerWg *sync.WaitGroup
+	out      connector.Connector[*CANMessageBatch]
+
+	workerPool *internal.WorkerPool[*ingress.UDPData, *CANMessageBatch]
+}
+
+func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
+	l := internal.NewLogger("adapter", "cannelloni")
+
+	return &Cannelloni{
+		l:     l,
+		stats: internal.NewStats(l),
+
+		writerWg: &sync.WaitGroup{},
+
+		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newCannelloniWorkerGen(l)),
+	}
+}
+
+func (c *Cannelloni) Init(_ context.Context) error {
+	return nil
+}
+
+func (c *Cannelloni) runWriter(ctx context.Context) {
+	c.writerWg.Add(1)
+	defer c.writerWg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data := <-c.workerPool.OutputCh:
+			if err := c.out.Write(data); err != nil {
+				c.l.Warn("failed to write into output connector", "reason", err)
+			}
+		}
+	}
+}
+
+func (c *Cannelloni) Run(ctx context.Context) {
+	c.l.Info("running")
+
+	received := 0
+	skipped := 0
+	defer func() {
+		c.l.Info("received frames", "count", received)
+		c.l.Info("skipped frames", "count", skipped)
+	}()
+
+	go c.stats.RunStats(ctx)
+
+	go c.workerPool.Run(ctx)
+
+	go c.runWriter(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		default:
+		}
+
+		data, err := c.in.Read()
+		if err != nil {
+			c.l.Warn("failed to read from input connector", "reason", err)
+			continue
+		}
+
+		c.stats.IncrementItemCount()
+		c.stats.IncrementByteCountBy(len(data.Frame))
+
+		received++
+
+		select {
+		case c.workerPool.InputCh <- data:
+		default:
+			skipped++
+		}
+	}
+}
+
+func (c *Cannelloni) Stop() {
+	defer c.l.Info("stopped")
+
+	c.out.Close()
+	c.workerPool.Stop()
+	c.writerWg.Wait()
+}
+
+func (c *Cannelloni) SetInput(connector connector.Connector[*ingress.UDPData]) {
+	c.in = connector
+}
+
+func (c *Cannelloni) SetOutput(connector connector.Connector[*CANMessageBatch]) {
+	c.out = connector
+}
+
 type cannelloniFrameMessage struct {
 	canID     uint32
 	dataLen   uint8
@@ -32,167 +185,45 @@ type cannelloniFrame struct {
 	messages       []cannelloniFrameMessage
 }
 
-type CANMessageBatch struct {
-	Timestamp time.Time
-	Messages  []CANMessage
+type cannelloniWorker struct {
+	*internal.BaseWorker
 }
 
-type CANMessage struct {
-	CANID   uint32
-	DataLen int
-	RawData []byte
-}
-
-type CannelloniConfig struct {
-	WorkerNum int
-}
-
-func DefaultCannelloniConfig() *CannelloniConfig {
-	return &CannelloniConfig{
-		WorkerNum: 1,
-	}
-}
-
-type Cannelloni struct {
-	l     *internal.Logger
-	stats *internal.Stats
-
-	in connector.Connector[*ingress.UDPData]
-
-	pool *sync.Pool
-	out  connector.Connector[*CANMessageBatch]
-
-	workerNum int
-	workerWg  *sync.WaitGroup
-	workerCh  chan *ingress.UDPData
-}
-
-func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
-	l := internal.NewLogger("adapter", "cannelloni")
-
-	return &Cannelloni{
-		l:     l,
-		stats: internal.NewStats(l),
-
-		pool: &sync.Pool{
-			New: func() any {
-				return &CANMessageBatch{
-					Messages: make([]CANMessage, defaultCANMessageNum),
-				}
-			},
-		},
-
-		workerNum: cfg.WorkerNum,
-		workerWg:  &sync.WaitGroup{},
-		workerCh:  make(chan *ingress.UDPData, cfg.WorkerNum*16),
-	}
-}
-
-func (p *Cannelloni) Init(ctx context.Context) error {
-	return nil
-}
-
-func (p *Cannelloni) runWorker(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data := <-p.workerCh:
-			f, err := p.decodeFrame(data.Frame)
-			if err != nil {
-				p.l.Warn("failed to decode frame", "reason", err)
-				continue
-			}
-
-			msgBatch := p.pool.Get().(*CANMessageBatch)
-			msgBatch.Timestamp = time.Now()
-
-			if len(f.messages) > defaultCANMessageNum {
-				msgBatch.Messages = make([]CANMessage, len(f.messages))
-			}
-
-			for idx, tmpMsg := range f.messages {
-				msgBatch.Messages[idx] = CANMessage{
-					CANID:   tmpMsg.canID,
-					DataLen: int(tmpMsg.dataLen),
-					RawData: tmpMsg.data,
-				}
-			}
-
-			if err := p.out.Write(msgBatch); err != nil {
-				p.l.Warn("failed to write into output connector", "reason", err)
-			}
-
-			p.pool.Put(msgBatch)
+func newCannelloniWorkerGen(l *internal.Logger) internal.WorkerGen[*ingress.UDPData, *CANMessageBatch] {
+	return func() internal.Worker[*ingress.UDPData, *CANMessageBatch] {
+		return &cannelloniWorker{
+			BaseWorker: internal.NewBaseWorker(l),
 		}
 	}
 }
 
-func (p *Cannelloni) Run(ctx context.Context) {
-	p.l.Info("starting run")
-	defer p.l.Info("quitting run")
-
-	go p.stats.RunStats(ctx)
-
-	p.workerWg.Add(p.workerNum)
-
-	for range p.workerNum {
-		go func() {
-			p.runWorker(ctx)
-			p.workerWg.Done()
-		}()
+func (w *cannelloniWorker) DoWork(_ context.Context, udpData *ingress.UDPData) (*CANMessageBatch, error) {
+	f, err := w.decodeFrame(udpData.Frame)
+	if err != nil {
+		return nil, err
 	}
 
-	received := 0
-	skipped := 0
-	defer func() {
-		p.l.Info("received frames", "count", received)
-		p.l.Info("skipped frames", "count", skipped)
-	}()
+	// ingress.UDPDataPoolInstance.Put(udpData)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
+	msgBatch := CANMessageBatchPoolInstance.Get()
+	msgBatch.Timestamp = time.Now()
 
-		default:
-		}
+	if len(f.messages) > defaultCANMessageNum {
+		msgBatch.Messages = make([]CANMessage, len(f.messages))
+	}
 
-		data, err := p.in.Read()
-		if err != nil {
-			p.l.Warn("failed to read from input connector", "reason", err)
-			continue
-		}
-
-		p.stats.IncrementItemCount()
-		p.stats.IncrementByteCountBy(len(data.Frame))
-
-		received++
-
-		select {
-		case p.workerCh <- data:
-		default:
-			skipped++
+	for idx, tmpMsg := range f.messages {
+		msgBatch.Messages[idx] = CANMessage{
+			CANID:   tmpMsg.canID,
+			DataLen: int(tmpMsg.dataLen),
+			RawData: tmpMsg.data,
 		}
 	}
+
+	return msgBatch, nil
 }
 
-func (p *Cannelloni) Stop() {
-	p.out.Close()
-
-	p.workerWg.Wait()
-	close(p.workerCh)
-}
-
-func (p *Cannelloni) SetInput(connector connector.Connector[*ingress.UDPData]) {
-	p.in = connector
-}
-
-func (p *Cannelloni) SetOutput(connector connector.Connector[*CANMessageBatch]) {
-	p.out = connector
-}
-
-func (p *Cannelloni) decodeFrame(buf []byte) (*cannelloniFrame, error) {
+func (w *cannelloniWorker) decodeFrame(buf []byte) (*cannelloniFrame, error) {
 	if buf == nil {
 		return nil, errors.New("nil buffer")
 	}
@@ -211,7 +242,7 @@ func (p *Cannelloni) decodeFrame(buf []byte) (*cannelloniFrame, error) {
 	f.messages = make([]cannelloniFrameMessage, f.messageCount)
 	pos := 5
 	for i := uint16(0); i < f.messageCount; i++ {
-		n, err := p.decodeFrameMessage(buf[pos:], &f.messages[i])
+		n, err := w.decodeFrameMessage(buf[pos:], &f.messages[i])
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +253,7 @@ func (p *Cannelloni) decodeFrame(buf []byte) (*cannelloniFrame, error) {
 	return &f, nil
 }
 
-func (p *Cannelloni) decodeFrameMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
+func (w *cannelloniWorker) decodeFrameMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
 	if len(buf) < 5 {
 		return 0, errors.New("not enough data")
 	}
