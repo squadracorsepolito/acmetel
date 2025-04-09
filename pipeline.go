@@ -7,14 +7,6 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 )
 
-type stageKind string
-
-const (
-	stageKindIngress      stageKind = "ingress"
-	stageKindPreProcessor stageKind = "pre-processor"
-	stageKindProcessor    stageKind = "processor"
-)
-
 type Stage interface {
 	Init(ctx context.Context) error
 	Run(ctx context.Context)
