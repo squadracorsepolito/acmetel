@@ -3,15 +3,27 @@ package processor
 import (
 	"context"
 	"sync"
+	"time"
 
+	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
+type CANSignalBatch struct {
+	Timestamp time.Time
+	Signals   []CANSignal
+}
+
+type CANSignal struct {
+	CANID uint32
+}
+
 type AcmelibConfig struct {
 	WorkerNum   int
 	ChannelSize int
+	Messages    []*acmelib.Message
 }
 
 func NewDefaultAcmelibConfig() *AcmelibConfig {
@@ -29,7 +41,7 @@ type Acmelib struct {
 
 	writerWg *sync.WaitGroup
 
-	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, int]
+	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, *CANSignalBatch]
 }
 
 func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
@@ -120,16 +132,24 @@ type acmelibWorker struct {
 	*internal.BaseWorker
 }
 
-func newAcmelibWorkerGen(l *internal.Logger) internal.WorkerGen[*adapter.CANMessageBatch, int] {
-	return func() internal.Worker[*adapter.CANMessageBatch, int] {
+func newAcmelibWorkerGen(l *internal.Logger) internal.WorkerGen[*adapter.CANMessageBatch, *CANSignalBatch] {
+	return func() internal.Worker[*adapter.CANMessageBatch, *CANSignalBatch] {
 		return &acmelibWorker{
 			BaseWorker: internal.NewBaseWorker(l),
 		}
 	}
 }
 
-func (w *acmelibWorker) DoWork(_ context.Context, msgBatch *adapter.CANMessageBatch) (int, error) {
+func (w *acmelibWorker) DoWork(_ context.Context, msgBatch *adapter.CANMessageBatch) (*CANSignalBatch, error) {
 	adapter.CANMessageBatchPoolInstance.Put(msgBatch)
 
-	return 0, nil
+	sigBatch := &CANSignalBatch{
+		Timestamp: msgBatch.Timestamp,
+	}
+
+	for _, msg := range msgBatch.Messages {
+		w.Logger().Info("processing message", "id", msg.CANID)
+	}
+
+	return sigBatch, nil
 }
