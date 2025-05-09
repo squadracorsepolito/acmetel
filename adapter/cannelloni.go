@@ -24,8 +24,9 @@ type CANMessage struct {
 }
 
 type CANMessageBatch struct {
-	Timestamp time.Time
-	Messages  []CANMessage
+	Timestamp    time.Time
+	MessageCount int
+	Messages     []CANMessage
 }
 
 type CANMessageBatchPool struct {
@@ -39,7 +40,8 @@ func newCANMessageBatchPool() *CANMessageBatchPool {
 		pool: &sync.Pool{
 			New: func() any {
 				return &CANMessageBatch{
-					Messages: make([]CANMessage, defaultCANMessageNum),
+					MessageCount: 0,
+					Messages:     make([]CANMessage, defaultCANMessageNum),
 				}
 			},
 		},
@@ -208,8 +210,10 @@ func (w *cannelloniWorker) DoWork(_ context.Context, udpData *ingress.UDPData) (
 	msgBatch := CANMessageBatchPoolInstance.Get()
 	msgBatch.Timestamp = time.Now()
 
-	if len(f.messages) > defaultCANMessageNum {
-		msgBatch.Messages = make([]CANMessage, len(f.messages))
+	messageCount := len(f.messages)
+	msgBatch.MessageCount = messageCount
+	if messageCount > defaultCANMessageNum {
+		msgBatch.Messages = make([]CANMessage, messageCount)
 	}
 
 	for idx, tmpMsg := range f.messages {

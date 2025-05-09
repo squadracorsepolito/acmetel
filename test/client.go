@@ -20,7 +20,7 @@ func main() {
 	f := cannelloni.NewFrame(0, 0)
 
 	for i := range 113 {
-		msg := cannelloni.NewFrameMessage(uint32(i*1000), []byte{0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8})
+		msg := cannelloni.NewFrameMessage(uint32(i), []byte{0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8})
 		f.AddMessage(msg)
 	}
 
@@ -29,18 +29,18 @@ func main() {
 
 	t1 := time.Now()
 
-	udpPackets := 1_000_000
+	udpPackets := 1_000_00
 	for i := range udpPackets {
 		_, err = conn.Write(data)
 		if err != nil {
 			panic(err)
 		}
 
-		if i%1000 == 0 {
-			// time.Sleep(time.Millisecond * 10)
+		if i%100 == 0 {
+			time.Sleep(time.Millisecond * 10)
 		}
 
-		// f.SequenceNumber++
+		f.SequenceNumber++
 	}
 
 	t2 := time.Now()

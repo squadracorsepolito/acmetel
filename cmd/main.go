@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel"
 	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
@@ -30,7 +32,7 @@ func main() {
 	adapter.SetInput(ingressToAdapter)
 	adapter.SetOutput(adapterToProc)
 
-	proc := processor.NewAcmelib(&processor.AcmelibConfig{WorkerNum: 4, ChannelSize: 512})
+	proc := processor.NewAcmelib(&processor.AcmelibConfig{WorkerNum: 8, ChannelSize: 1024, Messages: getMessages()})
 	proc.SetInput(adapterToProc)
 
 	pipeline := acmetel.NewPipeline()
@@ -47,4 +49,25 @@ func main() {
 	defer pipeline.Stop()
 
 	<-ctx.Done()
+}
+
+func getMessages() []*acmelib.Message {
+	messages := []*acmelib.Message{}
+
+	sigType, _ := acmelib.NewIntegerSignalType("sig_type", 8, false)
+	for i := range 113 {
+		msg := acmelib.NewMessage(fmt.Sprintf("message_%d", i), acmelib.MessageID(i), 8)
+
+		for j := range 8 {
+			sig, _ := acmelib.NewStandardSignal(fmt.Sprintf("message_%d_signal_%d", i, j), sigType)
+
+			if err := msg.InsertSignal(sig, j*8); err != nil {
+				panic(err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+
+	return messages
 }
