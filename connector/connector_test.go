@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	bufferCapacity   = 2048
-	numProducers     = 8
-	numConsumers     = 8
-	itemsPerProducer = 1_000_000
-	totalItems       = numProducers * itemsPerProducer
+	bufferCapacity          = 2048
+	numProducers            = 8
+	numConsumers            = 8
+	itemsPerProducer        = 1_000_000
+	totalItems              = numProducers * itemsPerProducer
+	benchmarkBufferCapacity = 2048
 )
 
 func Test_Connector_MultipleProducersConsumers(t *testing.T) {
@@ -151,11 +152,21 @@ func benchmarkWriteSequential(b *testing.B, connKind string) {
 		data []byte
 	}
 
-	connector := getConnectorFormKind[*dummy](connKind, uint64(b.N))
+	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
 	data := &dummy{
 		data: make([]byte, 2048),
 	}
+
+	go func() {
+		for {
+			_, err := connector.Read()
+			if err != nil {
+				b.Logf("Read error: %v,", err)
+				return
+			}
+		}
+	}()
 
 	b.ResetTimer()
 	for range b.N {
@@ -172,11 +183,21 @@ func benchmarkWriteParallel(b *testing.B, connKind string) {
 		data []byte
 	}
 
-	connector := getConnectorFormKind[*dummy](connKind, uint64(b.N))
+	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
 	data := &dummy{
 		data: make([]byte, 2048),
 	}
+
+	go func() {
+		for {
+			_, err := connector.Read()
+			if err != nil {
+				b.Logf("Read error: %v,", err)
+				return
+			}
+		}
+	}()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -195,19 +216,21 @@ func benchmarkReadSequential(b *testing.B, connKind string) {
 		data []byte
 	}
 
-	connector := getConnectorFormKind[*dummy](connKind, uint64(b.N))
+	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
 	data := &dummy{
 		data: make([]byte, 2048),
 	}
 
-	for range b.N {
-		err := connector.Write(data)
-		if err != nil {
-			b.Logf("Write error: %v,", err)
-			return
+	go func() {
+		for range b.N {
+			err := connector.Write(data)
+			if err != nil {
+				b.Logf("Write error: %v,", err)
+				return
+			}
 		}
-	}
+	}()
 
 	b.ResetTimer()
 	for range b.N {
@@ -224,19 +247,21 @@ func benchmarkReadParallel(b *testing.B, connKind string) {
 		data []byte
 	}
 
-	connector := getConnectorFormKind[*dummy](connKind, uint64(b.N))
+	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
 	data := &dummy{
 		data: make([]byte, 2048),
 	}
 
-	for range b.N {
-		err := connector.Write(data)
-		if err != nil {
-			b.Logf("Write error: %v,", err)
-			return
+	go func() {
+		for range b.N {
+			err := connector.Write(data)
+			if err != nil {
+				b.Logf("Write error: %v,", err)
+				return
+			}
 		}
-	}
+	}()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

@@ -39,9 +39,8 @@ type RingBuffer[T any] struct {
 
 	_ cpu.CacheLinePad
 
-	capacity     uint32
-	capMask      uint32
-	headTailMask uint64
+	capacity uint32
+	capMask  uint32
 
 	// notEmpty and notFull are used to signal that the buffer is not empty or full
 	notEmpty *sync.Cond
@@ -68,8 +67,6 @@ func NewRingBuffer[T any](capacity uint32) *RingBuffer[T] {
 		capMask:  capacity - 1,
 
 		buffer: make([]slot[T], capacity),
-
-		headTailMask: 1<<32 - 1,
 
 		mux:      mux,
 		notEmpty: sync.NewCond(mux),
