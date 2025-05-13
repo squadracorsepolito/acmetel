@@ -3,24 +3,38 @@ package internal
 import (
 	"context"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type Worker0[Task, Result any] interface {
-	DoWork(ctx context.Context, task Task) (Result, error)
+type Worker0[In, Out any] interface {
+	DoWork(ctx context.Context, task In) (Out, error)
 }
 
-type WorkerGen0[Task, Result any] func() Worker0[Task, Result]
+type WorkerGen0[In, Out any] func() Worker0[In, Out]
 
-type WorkerPoolConfigs struct {
-	InitialWorkers         int
-	MinWorkers, MaxWorkers int
-	QueueDepthPerWorker    int
-	AutoScaleInterval      time.Duration
+type WorkerPoolConfig0 struct {
+	AutoScale           bool
+	InitialWorkers      int
+	MinWorkers          int
+	MaxWorkers          int
+	QueueDepthPerWorker int
+	ScaleDownFactor     float64
+	AutoScaleInterval   time.Duration
+}
 
-	ScalingSensivity float64
+func NewDefaultWorkerPoolConfig() *WorkerPoolConfig0 {
+	return &WorkerPoolConfig0{
+		AutoScale:           true,
+		InitialWorkers:      1,
+		MinWorkers:          1,
+		MaxWorkers:          runtime.NumCPU(),
+		QueueDepthPerWorker: 128,
+		ScaleDownFactor:     0.1,
+		AutoScaleInterval:   3 * time.Second,
+	}
 }
 
 type throughputMetrics struct {
@@ -28,15 +42,10 @@ type throughputMetrics struct {
 	workerCount int
 }
 
-type WorkerPool0[Task, Result any] struct {
+type WorkerPool0[In, Out any] struct {
 	l *Logger
 
-	minWorkers        int
-	maxWorkers        int
-	targetQueueDepth  float64
-	autoScaleInterval time.Duration
-
-	workerGen WorkerGen0[Task, Result]
+	workerGen WorkerGen0[In, Out]
 	wg        *sync.WaitGroup
 
 	currWorkers   atomic.Int32
@@ -44,41 +53,46 @@ type WorkerPool0[Task, Result any] struct {
 
 	stopWorkerCh []chan struct{}
 
-	pendingTasks atomic.Int32
+	pendingTasks atomic.Int64
 
-	InputCh  chan Task
-	OutputCh chan Result
+	autoScale         bool
+	minWorkers        int
+	maxWorkers        int
+	targetQueueDepth  float64
+	scaleDownFactor   float64
+	autoScaleInterval time.Duration
 
-	scalingSensivity float64
+	InputCh  chan In
+	OutputCh chan Out
 }
 
-func NewWP[In, Out any](l *Logger, workerGen WorkerGen0[In, Out], configs WorkerPoolConfigs) *WorkerPool0[In, Out] {
-	channelSize := configs.MaxWorkers * configs.QueueDepthPerWorker * 2
+func NewWP[In, Out any](l *Logger, workerGen WorkerGen0[In, Out], cfg *WorkerPoolConfig0) *WorkerPool0[In, Out] {
+	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	wp := &WorkerPool0[In, Out]{
 		l: l,
 
-		minWorkers:        configs.MinWorkers,
-		maxWorkers:        configs.MaxWorkers,
-		targetQueueDepth:  float64(configs.QueueDepthPerWorker),
-		autoScaleInterval: configs.AutoScaleInterval,
-
 		workerGen: workerGen,
 		wg:        &sync.WaitGroup{},
 
-		stopWorkerCh: make([]chan struct{}, 0, configs.MaxWorkers),
+		stopWorkerCh: make([]chan struct{}, 0, cfg.MaxWorkers),
+
+		autoScale:         cfg.AutoScale,
+		minWorkers:        cfg.MinWorkers,
+		maxWorkers:        cfg.MaxWorkers,
+		targetQueueDepth:  float64(cfg.QueueDepthPerWorker),
+		scaleDownFactor:   cfg.ScaleDownFactor,
+		autoScaleInterval: cfg.AutoScaleInterval,
 
 		InputCh:  make(chan In, channelSize),
 		OutputCh: make(chan Out, channelSize),
-
-		scalingSensivity: configs.ScalingSensivity,
 	}
 
-	for range configs.MaxWorkers {
+	for range cfg.MaxWorkers {
 		wp.stopWorkerCh = append(wp.stopWorkerCh, make(chan struct{}))
 	}
 
-	wp.currWorkers.Store(int32(configs.InitialWorkers))
+	wp.currWorkers.Store(int32(cfg.InitialWorkers))
 
 	return wp
 }
@@ -142,54 +156,34 @@ func (wp *WorkerPool0[In, Out]) evaluateAndScale(ctx context.Context) {
 
 	wp.l.Info("auto-scaling metrics",
 		"active_workers", activeWorkers,
-		"curr_workers", currWorkers,
 		"pending_tasks", pendingTasks,
 		"queue_depth_per_worker", queueDepthPerWorker,
 	)
 
-	// Check if we're within an acceptable range based on sensitivity
-	acceptableRange := wp.targetQueueDepth * (1 + wp.scalingSensivity)
-	minimumRange := wp.targetQueueDepth * (1 - wp.scalingSensivity)
+	// Scale up if queue depth per worker is higher than target
+	if queueDepthPerWorker > wp.targetQueueDepth {
+		// Calculate how many workers to add based on queue depth
+		workersToAdd := max(int(math.Ceil(float64(pendingTasks)/wp.targetQueueDepth)), 1)
+		targetWorkers := min(currWorkers+workersToAdd, wp.maxWorkers)
 
-	if queueDepthPerWorker <= acceptableRange && queueDepthPerWorker >= minimumRange {
+		if targetWorkers > currWorkers {
+			wp.l.Info("scaling up", "from", currWorkers, "to", targetWorkers)
+			wp.scaleWorkers(ctx, int(targetWorkers))
+		}
+
 		return
 	}
 
-	// Intelligent scaling calculation
-	var targetWorkers int
+	// Scale down if we have more than min workers and there are fewer pending tasks than workers
+	if currWorkers > wp.minWorkers && pendingTasks < currWorkers {
+		// Remove workers
+		workersToRemove := max(int(math.Ceil(float64(currWorkers)*wp.scaleDownFactor)), 1)
+		targetWorkers := max(currWorkers-workersToRemove, wp.minWorkers)
 
-	// Scale up strategy
-	if queueDepthPerWorker > acceptableRange {
-		// More precise scaling calculation
-		targetWorkers = int(math.Ceil(float64(pendingTasks) / wp.targetQueueDepth))
-
-		// Ensure we don't over-scale
-		targetWorkers = min(targetWorkers, wp.maxWorkers)
-
-		// Gradual scaling: add workers incrementally
-		additionalWorkers := max(targetWorkers-currWorkers, 1)
-		targetWorkers = min(currWorkers+additionalWorkers, wp.maxWorkers)
-	}
-
-	// Scale down strategy
-	if queueDepthPerWorker < minimumRange {
-		// Calculate potential workers needed based on current load
-		targetWorkers = max(int(math.Ceil(float64(pendingTasks)/wp.targetQueueDepth)), wp.minWorkers)
-
-		// Ensure gradual scale-down
-		workersToRemove := max(int(math.Ceil(float64(currWorkers)*wp.scalingSensivity)), 1)
-		targetWorkers = max(currWorkers-workersToRemove, wp.minWorkers)
-	}
-
-	// Only scale if there's a meaningful change
-	if targetWorkers != currWorkers {
-		wp.l.Info("scaling workers",
-			"from", currWorkers,
-			"to", targetWorkers,
-			"queue_depth", queueDepthPerWorker,
-			"target_depth", wp.targetQueueDepth,
-		)
-		wp.scaleWorkers(ctx, targetWorkers)
+		if targetWorkers < currWorkers {
+			wp.l.Info("scaling down", "from", currWorkers, "to", targetWorkers)
+			wp.scaleWorkers(ctx, int(targetWorkers))
+		}
 	}
 }
 
@@ -213,6 +207,9 @@ func (wp *WorkerPool0[In, Out]) scaleWorkers(ctx context.Context, targetCount in
 	// Scale down
 	for i := currWorkerCount - 1; i >= targetCount; i-- {
 		select {
+		case <-ctx.Done():
+			return
+
 		case wp.stopWorkerCh[i] <- struct{}{}:
 		}
 	}
@@ -223,7 +220,9 @@ func (wp *WorkerPool0[In, Out]) Run(ctx context.Context) {
 		go wp.runWorker(ctx)
 	}
 
-	go wp.runAutoScale(ctx)
+	if wp.autoScale {
+		go wp.runAutoScale(ctx)
+	}
 }
 
 func (wp *WorkerPool0[In, Out]) Stop() {

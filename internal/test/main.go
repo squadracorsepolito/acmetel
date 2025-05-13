@@ -35,14 +35,9 @@ func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	wp := internal.NewWP(internal.NewLogger("worker_pool", "test"), newMockWorkerGen(100*time.Millisecond), internal.WorkerPoolConfigs{
-		InitialWorkers:      2,
-		MinWorkers:          2,
-		MaxWorkers:          100,
-		QueueDepthPerWorker: 20,
-		AutoScaleInterval:   time.Second * 3,
-		ScalingSensivity:    0.1, // 10%
-	})
+	configs := internal.NewDefaultWorkerPoolConfig()
+	configs.MaxWorkers = 64
+	wp := internal.NewWP(internal.NewLogger("worker_pool", "test"), newMockWorkerGen(100*time.Millisecond), configs)
 
 	go wp.Run(ctx)
 	defer wp.Stop()

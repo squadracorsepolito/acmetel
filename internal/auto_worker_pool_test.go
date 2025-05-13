@@ -29,21 +29,22 @@ func (w *mockWorker) DoWork(ctx context.Context, dataIn string) (string, error) 
 }
 
 func Test_WorkerPool_ScaleUp(t *testing.T) {
-	taskDelay := 100 * time.Millisecond
-	taskCount := 1000
+	taskDelay := 50 * time.Millisecond
+	taskCount := 100
 
-	wpConfig := WorkerPoolConfigs{
+	wpConfig := &WorkerPoolConfig0{
+		AutoScale:           true,
 		InitialWorkers:      2,
 		MinWorkers:          2,
 		MaxWorkers:          20,
 		QueueDepthPerWorker: 2,
+		ScaleDownFactor:     0.1,
 		AutoScaleInterval:   time.Second,
 	}
 
 	assert := assert.New(t)
 
-	ctx, cancelCtx := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancelCtx()
+	ctx, cancelCtx := context.WithTimeout(context.Background(), 30*time.Second)
 
 	wp := NewWP(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
 
@@ -57,7 +58,7 @@ func Test_WorkerPool_ScaleUp(t *testing.T) {
 		}
 	}()
 
-	wp.Run(ctx)
+	go wp.Run(ctx)
 	defer wp.Stop()
 
 	initialWorkerCount := int(wp.currWorkers.Load())
@@ -68,31 +69,31 @@ func Test_WorkerPool_ScaleUp(t *testing.T) {
 	}
 
 	// Wait for auto scaling to kick in
-	time.Sleep(10 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	scaledWorkerCount := int(wp.currWorkers.Load())
 	assert.Greater(scaledWorkerCount, initialWorkerCount)
 
-	// Wait for workers to finish
-	time.Sleep(5 * time.Second)
+	cancelCtx()
 }
 
 func Test_WorkerPool_ScaleDown(t *testing.T) {
 	taskDelay := 10 * time.Millisecond
 	taskCount := 100
 
-	wpConfig := WorkerPoolConfigs{
+	wpConfig := &WorkerPoolConfig0{
+		AutoScale:           true,
 		InitialWorkers:      10,
 		MinWorkers:          2,
 		MaxWorkers:          10,
 		QueueDepthPerWorker: 2,
+		ScaleDownFactor:     0.1,
 		AutoScaleInterval:   time.Second,
 	}
 
 	assert := assert.New(t)
 
-	ctx, cancelCtx := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancelCtx()
+	ctx, cancelCtx := context.WithTimeout(context.Background(), 30*time.Second)
 
 	wp := NewWP(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
 
@@ -106,7 +107,7 @@ func Test_WorkerPool_ScaleDown(t *testing.T) {
 		}
 	}()
 
-	wp.Run(ctx)
+	go wp.Run(ctx)
 	defer wp.Stop()
 
 	for taskID := range taskCount {
@@ -119,6 +120,5 @@ func Test_WorkerPool_ScaleDown(t *testing.T) {
 	scaledWorkerCount := int(wp.currWorkers.Load())
 	assert.Less(scaledWorkerCount, wpConfig.InitialWorkers)
 
-	// Wait for workers to finish
-	time.Sleep(5 * time.Second)
+	cancelCtx()
 }
