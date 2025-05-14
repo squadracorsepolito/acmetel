@@ -11,6 +11,7 @@ import (
 	"github.com/squadracorsepolito/acmetel"
 	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/processor"
 )
@@ -21,6 +22,7 @@ func main() {
 
 	ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](16_000)
 	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](16_000)
+	procToEgress := connector.NewRingBuffer[*egress.CANSignalBatch](16_000)
 
 	ingressCfg := ingress.NewDefaultUDPConfig()
 	ingress := ingress.NewUDP(ingressCfg)
@@ -35,12 +37,18 @@ func main() {
 	acmelibCfg.Messages = getMessages()
 	proc := processor.NewAcmelib(acmelibCfg)
 	proc.SetInput(adapterToProc)
+	proc.SetOutput(procToEgress)
+
+	egressCfg := egress.NewDefaultQuestDBConfig()
+	egress := egress.NewQuestDB(egressCfg)
+	egress.SetInput(procToEgress)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(ingress)
 	pipeline.AddStage(adapter)
 	pipeline.AddStage(proc)
+	pipeline.AddStage(egress)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)

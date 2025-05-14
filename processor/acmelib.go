@@ -3,27 +3,13 @@ package processor
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
-
-type CANSignalBatch struct {
-	Timestamp time.Time
-	Signals   []CANSignal
-}
-
-type CANSignal struct {
-	CANID     uint32
-	Name      string
-	RawValue  uint64
-	ValueType acmelib.SignalValueType
-	Value     any
-	Unit      string
-}
 
 type AcmelibConfig struct {
 	*internal.WorkerPoolConfig
@@ -41,11 +27,12 @@ type Acmelib struct {
 	l     *internal.Logger
 	stats *internal.Stats
 
-	in connector.Connector[*adapter.CANMessageBatch]
+	in  connector.Connector[*adapter.CANMessageBatch]
+	out connector.Connector[*egress.CANSignalBatch]
 
 	writerWg *sync.WaitGroup
 
-	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, *CANSignalBatch]
+	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, *egress.CANSignalBatch]
 }
 
 func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
@@ -74,8 +61,10 @@ func (a *Acmelib) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-a.workerPool.OutputCh:
-			// TODO! write to next stage
+		case data := <-a.workerPool.OutputCh:
+			if err := a.out.Write(data); err != nil {
+				a.l.Warn("failed to write into output connector", "reason", err)
+			}
 		}
 	}
 }
@@ -123,6 +112,7 @@ func (a *Acmelib) Run(ctx context.Context) {
 func (a *Acmelib) Stop() {
 	defer a.l.Info("stopped")
 
+	a.out.Close()
 	a.workerPool.Stop()
 	a.writerWg.Wait()
 }
@@ -131,22 +121,26 @@ func (a *Acmelib) SetInput(connector connector.Connector[*adapter.CANMessageBatc
 	a.in = connector
 }
 
+func (a *Acmelib) SetOutput(connector connector.Connector[*egress.CANSignalBatch]) {
+	a.out = connector
+}
+
 type acmelibWorker struct {
 	decoder *acmelibDecoder
 }
 
-func newAcmelibWorkerGen(decoder *acmelibDecoder) internal.WorkerGen[*adapter.CANMessageBatch, *CANSignalBatch] {
-	return func() internal.Worker[*adapter.CANMessageBatch, *CANSignalBatch] {
+func newAcmelibWorkerGen(decoder *acmelibDecoder) internal.WorkerGen[*adapter.CANMessageBatch, *egress.CANSignalBatch] {
+	return func() internal.Worker[*adapter.CANMessageBatch, *egress.CANSignalBatch] {
 		return &acmelibWorker{
 			decoder: decoder,
 		}
 	}
 }
 
-func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessageBatch) (*CANSignalBatch, error) {
+func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessageBatch) (*egress.CANSignalBatch, error) {
 	adapter.CANMessageBatchPoolInstance.Put(msgBatch)
 
-	sigBatch := &CANSignalBatch{
+	sigBatch := &egress.CANSignalBatch{
 		Timestamp: msgBatch.Timestamp,
 	}
 
@@ -155,16 +149,37 @@ func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessage
 
 		decodings := w.decoder.decode(ctx, msg.CANID, msg.RawData)
 		for _, dec := range decodings {
-			sig := CANSignal{
-				CANID:     msg.CANID,
-				Name:      dec.Signal.Name(),
-				RawValue:  dec.RawValue,
-				ValueType: dec.ValueType,
-				Value:     dec.Value,
-				Unit:      dec.Unit,
+			sig := egress.CANSignal{
+				CANID:    int64(msg.CANID),
+				Name:     dec.Signal.Name(),
+				RawValue: int64(dec.RawValue),
+				Unit:     dec.Unit,
+			}
+
+			switch dec.ValueType {
+			case acmelib.SignalValueTypeFlag:
+				sig.Table = egress.CANSignalTableFlag
+				sig.ValueFlag = dec.ValueAsFlag()
+
+			case acmelib.SignalValueTypeInt:
+				sig.Table = egress.CANSignalTableInt
+				sig.ValueInt = dec.ValueAsInt()
+
+			case acmelib.SignalValueTypeUint:
+				sig.Table = egress.CANSignalTableInt
+				sig.ValueInt = int64(dec.ValueAsUint())
+
+			case acmelib.SignalValueTypeFloat:
+				sig.Table = egress.CANSignalTableFloat
+				sig.ValueFloat = dec.ValueAsFloat()
+
+			case acmelib.SignalValueTypeEnum:
+				sig.Table = egress.CANSignalTableEnum
+				sig.ValueEnum = dec.ValueAsEnum()
 			}
 
 			sigBatch.Signals = append(sigBatch.Signals, sig)
+			sigBatch.SignalCount++
 		}
 	}
 

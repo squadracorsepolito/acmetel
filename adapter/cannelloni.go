@@ -103,12 +103,10 @@ func (c *Cannelloni) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		// case data := <-c.workerPool.OutputCh:
-		// 	if err := c.out.Write(data); err != nil {
-		// 		c.l.Warn("failed to write into output connector", "reason", err)
-		// 	}
-		case <-c.workerPool.OutputCh:
-
+		case data := <-c.workerPool.OutputCh:
+			if err := c.out.Write(data); err != nil {
+				c.l.Warn("failed to write into output connector", "reason", err)
+			}
 		}
 	}
 }

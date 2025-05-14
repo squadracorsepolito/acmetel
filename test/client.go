@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"time"
@@ -17,33 +18,43 @@ func main() {
 		panic(err)
 	}
 
-	f := cannelloni.NewFrame(0, 0)
+	udpPackets := 100_000
 
-	for i := range 113 {
-		msg := cannelloni.NewFrameMessage(uint32(i), []byte{0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8})
-		f.AddMessage(msg)
+	packets := make([][]byte, 0, udpPackets)
+	for i := range udpPackets {
+		f := cannelloni.NewFrame(0, 0)
+
+		for i := range 113 {
+			val := uint8(rand.Int32N(255))
+			msg := cannelloni.NewFrameMessage(uint32(i), []byte{val, val, val, val, val, val, val, val})
+			f.AddMessage(msg)
+		}
+
+		f.SequenceNumber = uint8(i % 255)
+		data := f.Encode()
+
+		packets = append(packets, data)
 	}
 
-	data := f.Encode()
-	log.Print("packet size: ", len(data))
+	packetSize := len(packets[0])
+	log.Print("packet size: ", packetSize)
 
 	t1 := time.Now()
 
-	udpPackets := 1_000_000
-	for i := range udpPackets {
+	for i, data := range packets {
 		_, err = conn.Write(data)
 		if err != nil {
 			panic(err)
 		}
 
-		if i%1000 == 0 {
-			time.Sleep(time.Millisecond * 10)
+		if i%100 == 0 {
+			time.Sleep(time.Millisecond * 100)
 		}
-
-		f.SequenceNumber++
 	}
 
 	t2 := time.Now()
 
-	log.Print("packets per sec: ", float64(udpPackets)/t2.Sub(t1).Seconds())
+	packetsPerSec := float64(udpPackets) / t2.Sub(t1).Seconds()
+	log.Print("packets per sec: ", packetsPerSec)
+	log.Print("bytes per sec: ", packetsPerSec*float64(packetSize))
 }

@@ -6,6 +6,10 @@ github.com/jaevor/go-nanoid v1.4.0 h1:mPz0oi3CrQyEtRxeRq927HHtZCJAAtZ7zdy7vOkrvW
 github.com/jaevor/go-nanoid v1.4.0/go.mod h1:GIpPtsvl3eSBsjjIEFQdzzgpi50+Bo1Luk+aYlbJzlc=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/questdb/go-questdb-client v1.0.5 h1:3DPeGeEMM5jb3nmK4yKIO4yuCXAId/jtpp5OAjEFNjY=
+github.com/questdb/go-questdb-client v1.0.5/go.mod h1:wdHxqNTLLL9teUdnQzwrwlw3dz46kNKlUoDCctn9DU4=
+github.com/questdb/go-questdb-client/v3 v3.2.0 h1:rFlkc3tD+vNucd4dkNv2xN5xqcFJGwqxt3F5p2H8zrg=
+github.com/questdb/go-questdb-client/v3 v3.2.0/go.mod h1:kXoftTVQZlksdJ9tsHQRWfdWO5Kyl4bZuKotyyeWa3c=
 github.com/squadracorsepolito/acmelib v1.15.1 h1:c5dSxMpYVVvDwgCMcx/bfcFh5SydnFJ80+WXTAxN/9g=
 github.com/squadracorsepolito/acmelib v1.15.1/go.mod h1:9LAqYzKfnoyNh4BHyLdr+KmF7Uf4Qt8ovDRsDc+vJCw=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
