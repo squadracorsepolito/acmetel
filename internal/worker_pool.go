@@ -2,107 +2,252 @@ package internal
 
 import (
 	"context"
+	"math"
+	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
-type WorkerPoolConfig struct {
-	WorkerNum   int
-	ChannelSize int
+type Worker[In, Out any] interface {
+	DoWork(ctx context.Context, task In) (Out, error)
 }
 
 type WorkerGen[In, Out any] func() Worker[In, Out]
 
-type Worker[In, Out any] interface {
-	Logger() *Logger
-
-	SetID(id int)
-	ID() int
-
-	DoWork(ctx context.Context, dataIn In) (Out, error)
+type WorkerPoolConfig struct {
+	AutoScale           bool
+	InitialWorkers      int
+	MinWorkers          int
+	MaxWorkers          int
+	QueueDepthPerWorker int
+	ScaleDownFactor     float64
+	AutoScaleInterval   time.Duration
 }
 
-type BaseWorker struct {
-	l  *Logger
-	id int
-}
-
-func NewBaseWorker(l *Logger) *BaseWorker {
-	return &BaseWorker{
-		l: l,
+func NewDefaultWorkerPoolConfig() *WorkerPoolConfig {
+	return &WorkerPoolConfig{
+		AutoScale:           true,
+		InitialWorkers:      1,
+		MinWorkers:          1,
+		MaxWorkers:          runtime.NumCPU(),
+		QueueDepthPerWorker: 128,
+		ScaleDownFactor:     0.1,
+		AutoScaleInterval:   3 * time.Second,
 	}
 }
 
-func (w *BaseWorker) Logger() *Logger {
-	return w.l
-}
-
-func (w *BaseWorker) SetID(id int) {
-	w.id = id
-}
-
-func (w *BaseWorker) ID() int {
-	return w.id
+type throughputMetrics struct {
+	throughput  float64
+	workerCount int
 }
 
 type WorkerPool[In, Out any] struct {
-	num     int
-	wg      *sync.WaitGroup
-	workers []Worker[In, Out]
+	l *Logger
+
+	workerGen WorkerGen[In, Out]
+	wg        *sync.WaitGroup
+
+	currWorkers   atomic.Int32
+	activeWorkers atomic.Int32
+
+	stopWorkerCh []chan struct{}
+
+	pendingTasks atomic.Int64
+
+	autoScale         bool
+	minWorkers        int
+	maxWorkers        int
+	targetQueueDepth  float64
+	scaleDownFactor   float64
+	autoScaleInterval time.Duration
 
 	InputCh  chan In
 	OutputCh chan Out
 }
 
-func NewWorkerPool[In, Out any](workerNum, channelSize int, workerGen WorkerGen[In, Out]) *WorkerPool[In, Out] {
-	workers := make([]Worker[In, Out], workerNum)
-	for i := range workerNum {
-		worker := workerGen()
-		worker.SetID(i)
-		workers[i] = worker
-	}
+func NewWorkerPool[In, Out any](l *Logger, workerGen WorkerGen[In, Out], cfg *WorkerPoolConfig) *WorkerPool[In, Out] {
+	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
-	return &WorkerPool[In, Out]{
-		num:     workerNum,
-		wg:      &sync.WaitGroup{},
-		workers: workers,
+	wp := &WorkerPool[In, Out]{
+		l: l,
+
+		workerGen: workerGen,
+		wg:        &sync.WaitGroup{},
+
+		stopWorkerCh: make([]chan struct{}, 0, cfg.MaxWorkers),
+
+		autoScale:         cfg.AutoScale,
+		minWorkers:        cfg.MinWorkers,
+		maxWorkers:        cfg.MaxWorkers,
+		targetQueueDepth:  float64(cfg.QueueDepthPerWorker),
+		scaleDownFactor:   cfg.ScaleDownFactor,
+		autoScaleInterval: cfg.AutoScaleInterval,
 
 		InputCh:  make(chan In, channelSize),
 		OutputCh: make(chan Out, channelSize),
 	}
+
+	for range cfg.MaxWorkers {
+		wp.stopWorkerCh = append(wp.stopWorkerCh, make(chan struct{}))
+	}
+
+	wp.currWorkers.Store(int32(cfg.InitialWorkers))
+
+	return wp
 }
 
-func (wp *WorkerPool[In, Out]) runWorker(ctx context.Context, worker Worker[In, Out]) {
+func (wp *WorkerPool[In, Out]) runWorker(ctx context.Context) {
+	wp.wg.Add(1)
 	defer wp.wg.Done()
 
-	worker.Logger().Info("starting worker", "worker_id", worker.ID())
-	defer worker.Logger().Info("stopping worker", "worker_id", worker.ID())
+	workerID := int(wp.activeWorkers.Add(1)) - 1
+	defer wp.activeWorkers.Add(-1)
+
+	worker := wp.workerGen()
+
+	wp.l.Info("starting worker", "worker_id", workerID)
+	defer wp.l.Info("stopping worker", "worker_id", workerID)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-wp.stopWorkerCh[workerID]:
+			return
+
 		case dataIn := <-wp.InputCh:
 			dataOut, err := worker.DoWork(ctx, dataIn)
 			if err != nil {
-				worker.Logger().Error("failed to do work", "worker_id", worker.ID(), "cause", err)
+				wp.l.Error("failed to do work", "worker_id", workerID, "cause", err)
 				continue
 			}
 
 			wp.OutputCh <- dataOut
+
+			wp.pendingTasks.Add(-1)
+		}
+	}
+}
+
+func (wp *WorkerPool[In, Out]) runAutoScale(ctx context.Context) {
+	ticker := time.NewTicker(wp.autoScaleInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ticker.C:
+			wp.evaluateAndScale(ctx)
+		}
+	}
+}
+
+func (wp *WorkerPool[In, Out]) evaluateAndScale(ctx context.Context) {
+	currWorkers := int(wp.currWorkers.Load())
+	pendingTasks := int(wp.pendingTasks.Load())
+	activeWorkers := int(wp.activeWorkers.Load())
+
+	// Calculate queue depth per worker
+	queueDepthPerWorker := float64(pendingTasks) / float64(currWorkers)
+
+	wp.l.Info("auto-scaling metrics",
+		"active_workers", activeWorkers,
+		"pending_tasks", pendingTasks,
+		"queue_depth_per_worker", queueDepthPerWorker,
+	)
+
+	// Scale up if queue depth per worker is higher than target
+	if queueDepthPerWorker > wp.targetQueueDepth {
+		// Calculate how many workers to add based on queue depth
+		workersToAdd := max(int(math.Ceil(float64(pendingTasks)/wp.targetQueueDepth)), 1)
+		targetWorkers := min(currWorkers+workersToAdd, wp.maxWorkers)
+
+		if targetWorkers > currWorkers {
+			wp.l.Info("scaling up", "from", currWorkers, "to", targetWorkers)
+			wp.scaleWorkers(ctx, int(targetWorkers))
+		}
+
+		return
+	}
+
+	// Scale down if we have more than min workers and there are fewer pending tasks than workers
+	if currWorkers > wp.minWorkers && pendingTasks < currWorkers {
+		// Remove workers
+		workersToRemove := max(int(math.Ceil(float64(currWorkers)*wp.scaleDownFactor)), 1)
+		targetWorkers := max(currWorkers-workersToRemove, wp.minWorkers)
+
+		if targetWorkers < currWorkers {
+			wp.l.Info("scaling down", "from", currWorkers, "to", targetWorkers)
+			wp.scaleWorkers(ctx, int(targetWorkers))
+		}
+	}
+}
+
+func (wp *WorkerPool[In, Out]) scaleWorkers(ctx context.Context, targetCount int) {
+	currWorkerCount := int(wp.currWorkers.Load())
+	delta := targetCount - currWorkerCount
+
+	if delta == 0 {
+		return
+	}
+
+	wp.currWorkers.Store(int32(targetCount))
+
+	// Check if it has to scale up worker
+	if delta > 0 {
+		for range delta {
+			go wp.runWorker(ctx)
+		}
+	}
+
+	// Scale down
+	for i := currWorkerCount - 1; i >= targetCount; i-- {
+		select {
+		case <-ctx.Done():
+			return
+
+		case wp.stopWorkerCh[i] <- struct{}{}:
 		}
 	}
 }
 
 func (wp *WorkerPool[In, Out]) Run(ctx context.Context) {
-	wp.wg.Add(wp.num)
+	for range wp.currWorkers.Load() {
+		go wp.runWorker(ctx)
+	}
 
-	for _, worker := range wp.workers {
-		go wp.runWorker(ctx, worker)
+	if wp.autoScale {
+		go wp.runAutoScale(ctx)
 	}
 }
 
 func (wp *WorkerPool[In, Out]) Stop() {
+	wp.l.Info("stopping worker pool")
+
 	wp.wg.Wait()
+
+	for _, stopCh := range wp.stopWorkerCh {
+		close(stopCh)
+	}
+
 	close(wp.InputCh)
 	close(wp.OutputCh)
+}
+
+func (wp *WorkerPool[In, Out]) AddTask(ctx context.Context, task In) bool {
+	select {
+	case <-ctx.Done():
+		return false
+
+	case wp.InputCh <- task:
+		wp.pendingTasks.Add(1)
+		return true
+
+	default:
+		return false
+	}
 }

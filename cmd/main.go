@@ -23,16 +23,17 @@ func main() {
 	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](16_000)
 
 	ingressCfg := ingress.NewDefaultUDPConfig()
-	ingressCfg.WorkerNum = 8
-	ingressCfg.ChannelSize = 1024
 	ingress := ingress.NewUDP(ingressCfg)
 	ingress.SetOutput(ingressToAdapter)
 
-	adapter := adapter.NewCannelloni(&adapter.CannelloniConfig{WorkerNum: 8, ChannelSize: 1024})
+	cannelloniCfg := adapter.NewDefaultCannelloniConfig()
+	adapter := adapter.NewCannelloni(cannelloniCfg)
 	adapter.SetInput(ingressToAdapter)
 	adapter.SetOutput(adapterToProc)
 
-	proc := processor.NewAcmelib(&processor.AcmelibConfig{WorkerNum: 8, ChannelSize: 1024, Messages: getMessages()})
+	acmelibCfg := processor.NewDefaultAcmelibConfig()
+	acmelibCfg.Messages = getMessages()
+	proc := processor.NewAcmelib(acmelibCfg)
 	proc.SetInput(adapterToProc)
 
 	pipeline := acmetel.NewPipeline()

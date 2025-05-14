@@ -119,18 +119,8 @@ func main() {
     // Create a new connector between ingress and stage2
     ingressToStage2 := connector.NewRingBuffer[*ingress.UDPData](4096)
 
-    ingressCfg := &UDPConfig{
-        // The IP address to listen on
-        IPAddr: "127.0.0.1",
-        // The port to listen on
-        Port: 20_000,
-        // The number of workers to use
-        WorkerNum: 2,
-        // The size of the channel between the workers and the reader/writer goroutines
-        ChannelSize: 32,
-    }
-
     // Create the UDP ingress
+    ingressCfg := ingress.NewDefaultUDPConfig()
     ingress := ingress.NewUDP(ingressCfg)
     // Set the output connector
 	ingress.SetOutput(ingressToStage2)
@@ -173,24 +163,15 @@ func main() {
     // Create a new connector between the adapter and stage3
     adapterToStage3 := connector.NewRingBuffer[*adapter.CANMessageBatch](4096)
 
-    ingressCfg := &UDPConfig{
-        // The IP address to listen on
-        IPAddr: "127.0.0.1",
-        // The port to listen on
-        Port: 20_000,
-        // The number of workers to use
-        WorkerNum: 2,
-        // The size of the channel between the workers and the reader/writer goroutines
-        ChannelSize: 32,
-    }
-
     // Create the UDP ingress
+    ingressCfg := ingress.NewDefaultUDPConfig()
     ingress := ingress.NewUDP(ingressCfg)
     // Set the output connector for the ingress
 	ingress.SetOutput(ingressToAdapter)
 
     // Create the cannelloni adapter
-    adapter := adapter.NewCannelloni(&adapter.CannelloniConfig{WorkerNum: 4, ChannelSize: 128})
+    adapterCfg := adapter.NewDefaultCannelloniConfig()
+    adapter := adapter.NewCannelloni(adapterCfg)
     // Set the input connector for the adapter
     adapter.SetInput(ingressToAdapter)
     // Set the output connector for the adapter

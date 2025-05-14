@@ -26,15 +26,14 @@ type CANSignal struct {
 }
 
 type AcmelibConfig struct {
-	WorkerNum   int
-	ChannelSize int
-	Messages    []*acmelib.Message
+	*internal.WorkerPoolConfig
+
+	Messages []*acmelib.Message
 }
 
 func NewDefaultAcmelibConfig() *AcmelibConfig {
 	return &AcmelibConfig{
-		WorkerNum:   1,
-		ChannelSize: 8,
+		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
 	}
 }
 
@@ -59,7 +58,7 @@ func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newAcmelibWorkerGen(l, decoder)),
+		workerPool: internal.NewWorkerPool(l, newAcmelibWorkerGen(decoder), cfg.WorkerPoolConfig),
 	}
 }
 
@@ -115,9 +114,7 @@ func (a *Acmelib) Run(ctx context.Context) {
 
 		received++
 
-		select {
-		case a.workerPool.InputCh <- msgBatch:
-		default:
+		if !a.workerPool.AddTask(ctx, msgBatch) {
 			skipped++
 		}
 	}
@@ -135,16 +132,12 @@ func (a *Acmelib) SetInput(connector connector.Connector[*adapter.CANMessageBatc
 }
 
 type acmelibWorker struct {
-	*internal.BaseWorker
-
 	decoder *acmelibDecoder
 }
 
-func newAcmelibWorkerGen(l *internal.Logger, decoder *acmelibDecoder) internal.WorkerGen[*adapter.CANMessageBatch, *CANSignalBatch] {
+func newAcmelibWorkerGen(decoder *acmelibDecoder) internal.WorkerGen[*adapter.CANMessageBatch, *CANSignalBatch] {
 	return func() internal.Worker[*adapter.CANMessageBatch, *CANSignalBatch] {
 		return &acmelibWorker{
-			BaseWorker: internal.NewBaseWorker(l),
-
 			decoder: decoder,
 		}
 	}

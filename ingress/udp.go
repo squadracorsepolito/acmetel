@@ -46,18 +46,18 @@ func (p *UDPDataPool) Put(d *UDPData) {
 }
 
 type UDPConfig struct {
-	IPAddr      string
-	Port        uint16
-	WorkerNum   int
-	ChannelSize int
+	*internal.WorkerPoolConfig
+
+	IPAddr string
+	Port   uint16
 }
 
 func NewDefaultUDPConfig() *UDPConfig {
 	return &UDPConfig{
-		IPAddr:      "127.0.0.1",
-		Port:        20_000,
-		WorkerNum:   1,
-		ChannelSize: 8,
+		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
+
+		IPAddr: "127.0.0.1",
+		Port:   20_000,
 	}
 }
 
@@ -87,7 +87,7 @@ func NewUDP(cfg *UDPConfig) *UDP {
 
 		addr: net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr(cfg.IPAddr), cfg.Port)),
 
-		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newUDPWorkerGen(l)),
+		workerPool: internal.NewWorkerPool(l, newUDPWorkerGen(), cfg.WorkerPoolConfig),
 
 		writerWg: &sync.WaitGroup{},
 	}
@@ -170,9 +170,7 @@ func (i *UDP) Run(ctx context.Context) {
 			continue
 		}
 
-		select {
-		case i.workerPool.InputCh <- buf:
-		default:
+		if !i.workerPool.AddTask(ctx, buf) {
 			skipped++
 		}
 	}
@@ -191,13 +189,13 @@ func (i *UDP) SetOutput(connector connector.Connector[*UDPData]) {
 }
 
 type udpWorker struct {
-	*internal.BaseWorker
+	// *internal.BaseWorker
 }
 
-func newUDPWorkerGen(l *internal.Logger) internal.WorkerGen[[]byte, *UDPData] {
+func newUDPWorkerGen() internal.WorkerGen[[]byte, *UDPData] {
 	return func() internal.Worker[[]byte, *UDPData] {
 		return &udpWorker{
-			BaseWorker: internal.NewBaseWorker(l),
+			// BaseWorker: internal.NewBaseWorker(l),
 		}
 	}
 }

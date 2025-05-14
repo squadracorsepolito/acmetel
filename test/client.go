@@ -29,14 +29,14 @@ func main() {
 
 	t1 := time.Now()
 
-	udpPackets := 1_000_00
+	udpPackets := 1_000_000
 	for i := range udpPackets {
 		_, err = conn.Write(data)
 		if err != nil {
 			panic(err)
 		}
 
-		if i%100 == 0 {
+		if i%1000 == 0 {
 			time.Sleep(time.Millisecond * 10)
 		}
 

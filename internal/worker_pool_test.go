@@ -13,8 +13,8 @@ type mockWorker struct {
 	delay time.Duration
 }
 
-func newMockWorkerGen(dalay time.Duration) WorkerGen0[string, string] {
-	return func() Worker0[string, string] {
+func newMockWorkerGen(dalay time.Duration) WorkerGen[string, string] {
+	return func() Worker[string, string] {
 		return &mockWorker{delay: dalay}
 	}
 }
@@ -32,7 +32,7 @@ func Test_WorkerPool_ScaleUp(t *testing.T) {
 	taskDelay := 50 * time.Millisecond
 	taskCount := 100
 
-	wpConfig := &WorkerPoolConfig0{
+	wpConfig := &WorkerPoolConfig{
 		AutoScale:           true,
 		InitialWorkers:      2,
 		MinWorkers:          2,
@@ -46,7 +46,7 @@ func Test_WorkerPool_ScaleUp(t *testing.T) {
 
 	ctx, cancelCtx := context.WithTimeout(context.Background(), 30*time.Second)
 
-	wp := NewWP(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
+	wp := NewWorkerPool(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
 
 	go func() {
 		for {
@@ -81,7 +81,7 @@ func Test_WorkerPool_ScaleDown(t *testing.T) {
 	taskDelay := 10 * time.Millisecond
 	taskCount := 100
 
-	wpConfig := &WorkerPoolConfig0{
+	wpConfig := &WorkerPoolConfig{
 		AutoScale:           true,
 		InitialWorkers:      10,
 		MinWorkers:          2,
@@ -95,7 +95,7 @@ func Test_WorkerPool_ScaleDown(t *testing.T) {
 
 	ctx, cancelCtx := context.WithTimeout(context.Background(), 30*time.Second)
 
-	wp := NewWP(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
+	wp := NewWorkerPool(NewLogger("worker_pool", "test"), newMockWorkerGen(taskDelay), wpConfig)
 
 	go func() {
 		for {

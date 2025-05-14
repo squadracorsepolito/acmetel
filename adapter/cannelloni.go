@@ -57,14 +57,12 @@ func (p *CANMessageBatchPool) Put(b *CANMessageBatch) {
 }
 
 type CannelloniConfig struct {
-	WorkerNum   int
-	ChannelSize int
+	*internal.WorkerPoolConfig
 }
 
 func NewDefaultCannelloniConfig() *CannelloniConfig {
 	return &CannelloniConfig{
-		WorkerNum:   1,
-		ChannelSize: 8,
+		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
 	}
 }
 
@@ -89,7 +87,7 @@ func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: internal.NewWorkerPool(cfg.WorkerNum, cfg.ChannelSize, newCannelloniWorkerGen(l)),
+		workerPool: internal.NewWorkerPool(l, newCannelloniWorkerGen(), cfg.WorkerPoolConfig),
 	}
 }
 
@@ -105,10 +103,12 @@ func (c *Cannelloni) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case data := <-c.workerPool.OutputCh:
-			if err := c.out.Write(data); err != nil {
-				c.l.Warn("failed to write into output connector", "reason", err)
-			}
+		// case data := <-c.workerPool.OutputCh:
+		// 	if err := c.out.Write(data); err != nil {
+		// 		c.l.Warn("failed to write into output connector", "reason", err)
+		// 	}
+		case <-c.workerPool.OutputCh:
+
 		}
 	}
 }
@@ -148,9 +148,7 @@ func (c *Cannelloni) Run(ctx context.Context) {
 
 		received++
 
-		select {
-		case c.workerPool.InputCh <- data:
-		default:
+		if !c.workerPool.AddTask(ctx, data) {
 			skipped++
 		}
 	}
@@ -188,14 +186,11 @@ type cannelloniFrame struct {
 }
 
 type cannelloniWorker struct {
-	*internal.BaseWorker
 }
 
-func newCannelloniWorkerGen(l *internal.Logger) internal.WorkerGen[*ingress.UDPData, *CANMessageBatch] {
+func newCannelloniWorkerGen() internal.WorkerGen[*ingress.UDPData, *CANMessageBatch] {
 	return func() internal.Worker[*ingress.UDPData, *CANMessageBatch] {
-		return &cannelloniWorker{
-			BaseWorker: internal.NewBaseWorker(l),
-		}
+		return &cannelloniWorker{}
 	}
 }
 
