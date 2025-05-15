@@ -78,5 +78,21 @@ func getMessages() []*acmelib.Message {
 		messages = append(messages, msg)
 	}
 
+	// dbcFile, err := os.Open("MCB.dbc")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer dbcFile.Close()
+	// bus, err := acmelib.ImportDBCFile("MCB", dbcFile)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// for _, nodeInt := range bus.NodeInterfaces() {
+	// 	for _, msg := range nodeInt.SentMessages() {
+	// 		messages = append(messages, msg)
+	// 	}
+	// }
+
 	return messages
 }
