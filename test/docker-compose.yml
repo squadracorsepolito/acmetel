@@ -23,3 +23,4 @@ services:
             - GF_AUTH_ANONYMOUS_ENABLED=false
         depends_on:
             - questdb
+        user: "0"

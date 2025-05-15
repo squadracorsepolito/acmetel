@@ -120,7 +120,7 @@ func (wp *WorkerPool[In, Out]) runWorker(ctx context.Context) {
 		case dataIn := <-wp.InputCh:
 			dataOut, err := worker.DoWork(ctx, dataIn)
 			if err != nil {
-				wp.l.Error("failed to do work", "worker_id", workerID, "cause", err)
+				wp.l.Error("failed to do work", err, "worker_id", workerID)
 				continue
 			}
 

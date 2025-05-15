@@ -149,13 +149,13 @@ func (i *UDP) Run(ctx context.Context) {
 				select {
 				case <-ctx.Done():
 				default:
-					i.l.Error("failed to read connection", "reason", err)
+					i.l.Error("failed to read connection", err)
 				}
 
 				return
 			}
 
-			i.l.Error("server failed to read", "reason", err)
+			i.l.Error("server failed to read", err)
 
 			return
 		}

@@ -33,7 +33,6 @@ type CANSignal struct {
 	ValueInt   int64
 	ValueFloat float64
 	ValueEnum  string
-	Unit       string
 }
 
 type QuestDBConfig struct {
@@ -159,7 +158,6 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
 				Int64Column("integer_value", sig.ValueInt).
-				StringColumn("unit", sig.Unit).
 				At(ctx, timestamp)
 
 		case CANSignalTableFloat:
@@ -168,7 +166,6 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
 				Float64Column("decimal_value", sig.ValueFloat).
-				StringColumn("unit", sig.Unit).
 				At(ctx, timestamp)
 
 		case CANSignalTableEnum:

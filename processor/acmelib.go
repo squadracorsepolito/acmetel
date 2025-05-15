@@ -153,7 +153,6 @@ func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessage
 				CANID:    int64(msg.CANID),
 				Name:     dec.Signal.Name(),
 				RawValue: int64(dec.RawValue),
-				Unit:     dec.Unit,
 			}
 
 			switch dec.ValueType {
