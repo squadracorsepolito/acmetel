@@ -10,6 +10,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/worker"
 )
 
 const (
@@ -57,12 +58,12 @@ func (p *CANMessageBatchPool) Put(b *CANMessageBatch) {
 }
 
 type CannelloniConfig struct {
-	*internal.WorkerPoolConfig
+	*worker.PoolConfig
 }
 
 func NewDefaultCannelloniConfig() *CannelloniConfig {
 	return &CannelloniConfig{
-		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
+		PoolConfig: worker.DefaultPoolConfig(),
 	}
 }
 
@@ -75,7 +76,7 @@ type Cannelloni struct {
 	writerWg *sync.WaitGroup
 	out      connector.Connector[*CANMessageBatch]
 
-	workerPool *internal.WorkerPool[*ingress.UDPData, *CANMessageBatch]
+	workerPool *cannelloniWorkerPool
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
@@ -87,11 +88,13 @@ func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: internal.NewWorkerPool(l, newCannelloniWorkerGen(), cfg.WorkerPoolConfig),
+		workerPool: worker.NewPool[cannelloniWorker, any, *ingress.UDPData, *CANMessageBatch](l, cfg.PoolConfig),
 	}
 }
 
-func (c *Cannelloni) Init(_ context.Context) error {
+func (c *Cannelloni) Init(ctx context.Context) error {
+	c.workerPool.Init(ctx, nil)
+
 	return nil
 }
 
@@ -103,7 +106,7 @@ func (c *Cannelloni) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case data := <-c.workerPool.OutputCh:
+		case data := <-c.workerPool.GetOutputCh():
 			if err := c.out.Write(data); err != nil {
 				c.l.Warn("failed to write into output connector", "reason", err)
 			}
@@ -183,13 +186,13 @@ type cannelloniFrame struct {
 	messages       []cannelloniFrameMessage
 }
 
+type cannelloniWorkerPool = worker.Pool[cannelloniWorker, any, *ingress.UDPData, *CANMessageBatch, *cannelloniWorker]
+
 type cannelloniWorker struct {
 }
 
-func newCannelloniWorkerGen() internal.WorkerGen[*ingress.UDPData, *CANMessageBatch] {
-	return func() internal.Worker[*ingress.UDPData, *CANMessageBatch] {
-		return &cannelloniWorker{}
-	}
+func (w *cannelloniWorker) Init(_ context.Context, _ any) error {
+	return nil
 }
 
 func (w *cannelloniWorker) DoWork(_ context.Context, udpData *ingress.UDPData) (*CANMessageBatch, error) {
@@ -218,6 +221,10 @@ func (w *cannelloniWorker) DoWork(_ context.Context, udpData *ingress.UDPData) (
 	}
 
 	return msgBatch, nil
+}
+
+func (w *cannelloniWorker) Stop(_ context.Context) error {
+	return nil
 }
 
 func (w *cannelloniWorker) decodeFrame(buf []byte) (*cannelloniFrame, error) {

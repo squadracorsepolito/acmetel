@@ -9,17 +9,18 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/worker"
 )
 
 type AcmelibConfig struct {
-	*internal.WorkerPoolConfig
+	*worker.PoolConfig
 
 	Messages []*acmelib.Message
 }
 
 func NewDefaultAcmelibConfig() *AcmelibConfig {
 	return &AcmelibConfig{
-		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
+		PoolConfig: worker.DefaultPoolConfig(),
 	}
 }
 
@@ -27,29 +28,35 @@ type Acmelib struct {
 	l     *internal.Logger
 	stats *internal.Stats
 
+	cfg *AcmelibConfig
+
 	in  connector.Connector[*adapter.CANMessageBatch]
 	out connector.Connector[*egress.CANSignalBatch]
 
 	writerWg *sync.WaitGroup
 
-	workerPool *internal.WorkerPool[*adapter.CANMessageBatch, *egress.CANSignalBatch]
+	workerPool *acmelibWorkerPool
 }
 
 func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
 	l := internal.NewLogger("processor", "acmelib")
-	decoder := newAcmelibDecoder(cfg.Messages)
 
 	return &Acmelib{
 		l:     l,
 		stats: internal.NewStats(l),
 
+		cfg: cfg,
+
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: internal.NewWorkerPool(l, newAcmelibWorkerGen(decoder), cfg.WorkerPoolConfig),
+		workerPool: worker.NewPool[acmelibWorker, *acmelibDecoder, *adapter.CANMessageBatch, *egress.CANSignalBatch](l, cfg.PoolConfig),
 	}
 }
 
 func (a *Acmelib) Init(ctx context.Context) error {
+	decoder := newAcmelibDecoder(a.cfg.Messages)
+	a.workerPool.Init(ctx, decoder)
+
 	return nil
 }
 
@@ -61,7 +68,7 @@ func (a *Acmelib) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case data := <-a.workerPool.OutputCh:
+		case data := <-a.workerPool.GetOutputCh():
 			if err := a.out.Write(data); err != nil {
 				a.l.Warn("failed to write into output connector", "reason", err)
 			}
@@ -125,16 +132,15 @@ func (a *Acmelib) SetOutput(connector connector.Connector[*egress.CANSignalBatch
 	a.out = connector
 }
 
+type acmelibWorkerPool = worker.Pool[acmelibWorker, *acmelibDecoder, *adapter.CANMessageBatch, *egress.CANSignalBatch, *acmelibWorker]
+
 type acmelibWorker struct {
 	decoder *acmelibDecoder
 }
 
-func newAcmelibWorkerGen(decoder *acmelibDecoder) internal.WorkerGen[*adapter.CANMessageBatch, *egress.CANSignalBatch] {
-	return func() internal.Worker[*adapter.CANMessageBatch, *egress.CANSignalBatch] {
-		return &acmelibWorker{
-			decoder: decoder,
-		}
-	}
+func (w *acmelibWorker) Init(_ context.Context, decoder *acmelibDecoder) error {
+	w.decoder = decoder
+	return nil
 }
 
 func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessageBatch) (*egress.CANSignalBatch, error) {
@@ -183,6 +189,10 @@ func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessage
 	}
 
 	return sigBatch, nil
+}
+
+func (w *acmelibWorker) Stop(_ context.Context) error {
+	return nil
 }
 
 type acmelibDecoder struct {

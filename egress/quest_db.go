@@ -7,6 +7,7 @@ import (
 	qdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/worker"
 )
 
 type CANSignalBatch struct {
@@ -15,14 +16,29 @@ type CANSignalBatch struct {
 	Signals     []CANSignal
 }
 
-type CANSignalTable string
+type CANSignalTable int
 
 const (
-	CANSignalTableFlag  CANSignalTable = "flag_signals"
-	CANSignalTableInt   CANSignalTable = "int_signals"
-	CANSignalTableFloat CANSignalTable = "float_signals"
-	CANSignalTableEnum  CANSignalTable = "enum_signals"
+	CANSignalTableFlag CANSignalTable = iota
+	CANSignalTableInt
+	CANSignalTableFloat
+	CANSignalTableEnum
 )
+
+func (c CANSignalTable) String() string {
+	switch c {
+	case CANSignalTableFlag:
+		return "flag_signals"
+	case CANSignalTableInt:
+		return "int_signals"
+	case CANSignalTableFloat:
+		return "float_signals"
+	case CANSignalTableEnum:
+		return "enum_signals"
+	default:
+		return "unknown"
+	}
+}
 
 type CANSignal struct {
 	CANID      int64
@@ -36,7 +52,7 @@ type CANSignal struct {
 }
 
 type QuestDBConfig struct {
-	*internal.WorkerPoolConfig
+	*worker.PoolConfig
 
 	Address string
 }
@@ -45,8 +61,8 @@ func NewDefaultQuestDBConfig() *QuestDBConfig {
 	qdb.WithAutoFlushInterval(time.Second)
 
 	return &QuestDBConfig{
-		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
-		Address:          "localhost:9000",
+		PoolConfig: worker.DefaultPoolConfig(),
+		Address:    "localhost:9000",
 	}
 }
 
@@ -59,7 +75,7 @@ type QuestDB struct {
 
 	in connector.Connector[*CANSignalBatch]
 
-	workerPool *internal.WorkerPool[*CANSignalBatch, any]
+	workerPool *questDBWorkerPool
 }
 
 func NewQuestDB(cfg *QuestDBConfig) *QuestDB {
@@ -69,16 +85,27 @@ func NewQuestDB(cfg *QuestDBConfig) *QuestDB {
 		l: l,
 
 		cfg: cfg,
+
+		workerPool: newQuestDBWorkerPool(l, cfg.PoolConfig),
 	}
 }
 
-func (e *QuestDB) Init(_ context.Context) error {
-	senderPool, err := qdb.PoolFromOptions(qdb.WithAddress(e.cfg.Address), qdb.WithHttp(), qdb.WithAutoFlushRows(100_000))
+func (e *QuestDB) Init(ctx context.Context) error {
+	senderPool, err := qdb.PoolFromOptions(
+		qdb.WithAddress(e.cfg.Address),
+		qdb.WithHttp(),
+		qdb.WithAutoFlushRows(100_000),
+		qdb.WithRetryTimeout(time.Second),
+	)
 	if err != nil {
 		return err
 	}
 
-	e.workerPool = internal.NewWorkerPool(e.l, newQuestDBWorkerGen(senderPool), e.cfg.WorkerPoolConfig)
+	e.senderPool = senderPool
+
+	if err := e.workerPool.Init(ctx, senderPool); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -86,22 +113,7 @@ func (e *QuestDB) Init(_ context.Context) error {
 func (e *QuestDB) Run(ctx context.Context) {
 	e.l.Info("running")
 
-	go func() {
-		<-ctx.Done()
-		// e.sender.Close(context.Background())
-	}()
-
 	go e.workerPool.Run(ctx)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-e.workerPool.OutputCh:
-			}
-		}
-	}()
 
 	for {
 		select {
@@ -124,17 +136,38 @@ func (e *QuestDB) Stop() {
 	defer e.l.Info("stopped")
 
 	e.workerPool.Stop()
+
+	if err := e.senderPool.Close(context.Background()); err != nil {
+		e.l.Error("failed to close sender pool", err)
+	}
 }
 
 func (e *QuestDB) SetInput(connector connector.Connector[*CANSignalBatch]) {
 	e.in = connector
 }
 
+type questDBWorkerPool = worker.EgressPool[questDBWorker, *qdb.LineSenderPool, *CANSignalBatch, *questDBWorker]
+
+func newQuestDBWorkerPool(l *internal.Logger, cfg *worker.PoolConfig) *questDBWorkerPool {
+	return worker.NewEgressPool[questDBWorker, *qdb.LineSenderPool, *CANSignalBatch](l, cfg)
+}
+
 type questDBWorker struct {
 	sender qdb.LineSender
 }
 
-func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, error) {
+func (w *questDBWorker) Init(ctx context.Context, senderPool *qdb.LineSenderPool) error {
+	sender, err := senderPool.Sender(ctx)
+	if err != nil {
+		return err
+	}
+
+	w.sender = sender
+
+	return nil
+}
+
+func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error {
 	timestamp := data.Timestamp
 
 	for i := range data.SignalCount {
@@ -145,7 +178,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 		table := sig.Table
 		switch table {
 		case CANSignalTableFlag:
-			err = w.sender.Table(string(table)).
+			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
@@ -153,7 +186,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 				At(ctx, timestamp)
 
 		case CANSignalTableInt:
-			err = w.sender.Table(string(table)).
+			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
@@ -161,7 +194,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 				At(ctx, timestamp)
 
 		case CANSignalTableFloat:
-			err = w.sender.Table(string(table)).
+			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
@@ -169,7 +202,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 				At(ctx, timestamp)
 
 		case CANSignalTableEnum:
-			err = w.sender.Table(string(table)).
+			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
 				Int64Column("raw_value", sig.RawValue).
@@ -178,22 +211,18 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) (any, 
 		}
 
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return struct{}{}, nil
+	return nil
 }
 
-func newQuestDBWorkerGen(senderPool *qdb.LineSenderPool) internal.WorkerGen[*CANSignalBatch, any] {
-	return func() internal.Worker[*CANSignalBatch, any] {
-		sender, err := senderPool.Sender(context.Background())
-		if err != nil {
-			panic(err)
-		}
-
-		return &questDBWorker{
-			sender: sender,
-		}
+func (w *questDBWorker) Stop(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return w.sender.Close(context.Background())
+	default:
+		return w.sender.Close(ctx)
 	}
 }

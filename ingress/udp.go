@@ -9,6 +9,7 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/worker"
 )
 
 const (
@@ -46,7 +47,7 @@ func (p *UDPDataPool) Put(d *UDPData) {
 }
 
 type UDPConfig struct {
-	*internal.WorkerPoolConfig
+	*worker.PoolConfig
 
 	IPAddr string
 	Port   uint16
@@ -54,7 +55,7 @@ type UDPConfig struct {
 
 func NewDefaultUDPConfig() *UDPConfig {
 	return &UDPConfig{
-		WorkerPoolConfig: internal.NewDefaultWorkerPoolConfig(),
+		PoolConfig: worker.DefaultPoolConfig(),
 
 		IPAddr: "127.0.0.1",
 		Port:   20_000,
@@ -73,7 +74,7 @@ type UDP struct {
 	writerWg *sync.WaitGroup
 	out      connector.Connector[*UDPData]
 
-	workerPool *internal.WorkerPool[[]byte, *UDPData]
+	workerPool *udpWorkerPool
 }
 
 func NewUDP(cfg *UDPConfig) *UDP {
@@ -87,7 +88,7 @@ func NewUDP(cfg *UDPConfig) *UDP {
 
 		addr: net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr(cfg.IPAddr), cfg.Port)),
 
-		workerPool: internal.NewWorkerPool(l, newUDPWorkerGen(), cfg.WorkerPoolConfig),
+		workerPool: worker.NewPool[udpWorker, any, []byte, *UDPData](l, cfg.PoolConfig),
 
 		writerWg: &sync.WaitGroup{},
 	}
@@ -101,6 +102,8 @@ func (i *UDP) Init(ctx context.Context) error {
 
 	i.conn = conn
 
+	i.workerPool.Init(ctx, nil)
+
 	return nil
 }
 
@@ -112,7 +115,8 @@ func (i *UDP) runWriter(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case data := <-i.workerPool.OutputCh:
+
+		case data := <-i.workerPool.GetOutputCh():
 			if err := i.out.Write(data); err != nil {
 				i.l.Warn("failed to write into output connector", "reason", err)
 			}
@@ -188,16 +192,12 @@ func (i *UDP) SetOutput(connector connector.Connector[*UDPData]) {
 	i.out = connector
 }
 
-type udpWorker struct {
-	// *internal.BaseWorker
-}
+type udpWorkerPool = worker.Pool[udpWorker, any, []byte, *UDPData, *udpWorker]
 
-func newUDPWorkerGen() internal.WorkerGen[[]byte, *UDPData] {
-	return func() internal.Worker[[]byte, *UDPData] {
-		return &udpWorker{
-			// BaseWorker: internal.NewBaseWorker(l),
-		}
-	}
+type udpWorker struct{}
+
+func (w *udpWorker) Init(_ context.Context, _ any) error {
+	return nil
 }
 
 func (w *udpWorker) DoWork(_ context.Context, buf []byte) (*UDPData, error) {
@@ -210,4 +210,8 @@ func (w *udpWorker) DoWork(_ context.Context, buf []byte) (*UDPData, error) {
 	copy(udpData.Frame, buf)
 
 	return udpData, nil
+}
+
+func (w *udpWorker) Stop(_ context.Context) error {
+	return nil
 }
