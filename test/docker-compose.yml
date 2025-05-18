@@ -24,3 +24,14 @@ services:
         depends_on:
             - questdb
         user: "0"
+
+    jaeger:
+        image: jaegertracing/jaeger
+        container_name: jaeger
+        ports:
+            - "16686:16686"
+            - "4317:4317"
+            - "4318:4318"
+            - "5778:5778"
+            - "9411:9411"
+        user: "0"

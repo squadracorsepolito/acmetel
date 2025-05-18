@@ -144,6 +144,9 @@ func (w *acmelibWorker) Init(_ context.Context, decoder *acmelibDecoder) error {
 }
 
 func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessageBatch) (*egress.CANSignalBatch, error) {
+	ctx, span := internal.Tracer.Start(ctx, "acmelib decoding")
+	defer span.End()
+
 	adapter.CANMessageBatchPoolInstance.Put(msgBatch)
 
 	sigBatch := &egress.CANSignalBatch{

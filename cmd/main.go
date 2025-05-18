@@ -13,12 +13,30 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/ingress"
+	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/processor"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
+
+	// Tracing
+	exporter, err := newTraceExporter(ctx)
+	if err != nil {
+		panic(err)
+	}
+	provider := newTraceProvider(exporter)
+	defer provider.Shutdown(context.Background())
+	otel.SetTracerProvider(provider)
+	internal.SetTracer(provider.Tracer("acmetel"))
 
 	ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](16_000)
 	adapterToProc := connector.NewRingBuffer[*adapter.CANMessageBatch](16_000)
@@ -95,4 +113,27 @@ func getMessages() []*acmelib.Message {
 	// }
 
 	return messages
+}
+
+func newTraceExporter(ctx context.Context) (*otlptrace.Exporter, error) {
+	return otlptracegrpc.New(ctx, otlptracegrpc.WithInsecure())
+}
+
+func newTraceProvider(exporter sdktrace.SpanExporter) *sdktrace.TracerProvider {
+	r, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("acmetel"),
+		),
+	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(r),
+	)
 }
