@@ -5,11 +5,11 @@ import (
 	"sync"
 
 	"github.com/squadracorsepolito/acmelib"
-	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type AcmelibConfig struct {
@@ -25,13 +25,15 @@ func NewDefaultAcmelibConfig() *AcmelibConfig {
 }
 
 type Acmelib struct {
-	l     *internal.Logger
+	l   *internal.Logger
+	tel *internal.Telemetry
+
 	stats *internal.Stats
 
 	cfg *AcmelibConfig
 
-	in  connector.Connector[*adapter.CANMessageBatch]
-	out connector.Connector[*egress.CANSignalBatch]
+	in  connector.Connector[*message.RawCANMessageBatch]
+	out connector.Connector[*message.CANSignalBatch]
 
 	writerWg *sync.WaitGroup
 
@@ -39,17 +41,20 @@ type Acmelib struct {
 }
 
 func NewAcmelib(cfg *AcmelibConfig) *Acmelib {
-	l := internal.NewLogger("processor", "acmelib")
+	tel := internal.NewTelemetry("processor", "acmelib")
+	l := tel.Logger()
 
 	return &Acmelib{
-		l:     l,
+		l:   l,
+		tel: tel,
+
 		stats: internal.NewStats(l),
 
 		cfg: cfg,
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: worker.NewPool[acmelibWorker, *acmelibDecoder, *adapter.CANMessageBatch, *egress.CANSignalBatch](l, cfg.PoolConfig),
+		workerPool: worker.NewPool[acmelibWorker, *acmelibDecoder, *message.RawCANMessageBatch, *message.CANSignalBatch](tel, cfg.PoolConfig),
 	}
 }
 
@@ -124,17 +129,18 @@ func (a *Acmelib) Stop() {
 	a.writerWg.Wait()
 }
 
-func (a *Acmelib) SetInput(connector connector.Connector[*adapter.CANMessageBatch]) {
+func (a *Acmelib) SetInput(connector connector.Connector[*message.RawCANMessageBatch]) {
 	a.in = connector
 }
 
-func (a *Acmelib) SetOutput(connector connector.Connector[*egress.CANSignalBatch]) {
+func (a *Acmelib) SetOutput(connector connector.Connector[*message.CANSignalBatch]) {
 	a.out = connector
 }
 
-type acmelibWorkerPool = worker.Pool[acmelibWorker, *acmelibDecoder, *adapter.CANMessageBatch, *egress.CANSignalBatch, *acmelibWorker]
+type acmelibWorkerPool = worker.Pool[acmelibWorker, *acmelibDecoder, *message.RawCANMessageBatch, *message.CANSignalBatch, *acmelibWorker]
 
 type acmelibWorker struct {
+	tel     *internal.Telemetry
 	decoder *acmelibDecoder
 }
 
@@ -143,22 +149,21 @@ func (w *acmelibWorker) Init(_ context.Context, decoder *acmelibDecoder) error {
 	return nil
 }
 
-func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessageBatch) (*egress.CANSignalBatch, error) {
-	ctx, span := internal.Tracer.Start(ctx, "acmelib decoding")
+func (w *acmelibWorker) Handle(ctx context.Context, msgBatch *message.RawCANMessageBatch) (*message.CANSignalBatch, error) {
+	defer message.PutRawCANMessageBatch(msgBatch)
+
+	ctx, span := w.tel.NewTrace(ctx, "process raw CAN message batch")
 	defer span.End()
 
-	adapter.CANMessageBatchPoolInstance.Put(msgBatch)
-
-	sigBatch := &egress.CANSignalBatch{
-		Timestamp: msgBatch.Timestamp,
-	}
+	sigBatch := message.NewCANSignalBatch()
+	sigBatch.Timestamp = msgBatch.Timestamp
 
 	for i := range msgBatch.MessageCount {
 		msg := msgBatch.Messages[i]
 
 		decodings := w.decoder.decode(ctx, msg.CANID, msg.RawData)
 		for _, dec := range decodings {
-			sig := egress.CANSignal{
+			sig := message.CANSignal{
 				CANID:    int64(msg.CANID),
 				Name:     dec.Signal.Name(),
 				RawValue: int64(dec.RawValue),
@@ -166,23 +171,23 @@ func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessage
 
 			switch dec.ValueType {
 			case acmelib.SignalValueTypeFlag:
-				sig.Table = egress.CANSignalTableFlag
+				sig.Table = message.CANSignalTableFlag
 				sig.ValueFlag = dec.ValueAsFlag()
 
 			case acmelib.SignalValueTypeInt:
-				sig.Table = egress.CANSignalTableInt
+				sig.Table = message.CANSignalTableInt
 				sig.ValueInt = dec.ValueAsInt()
 
 			case acmelib.SignalValueTypeUint:
-				sig.Table = egress.CANSignalTableInt
+				sig.Table = message.CANSignalTableInt
 				sig.ValueInt = int64(dec.ValueAsUint())
 
 			case acmelib.SignalValueTypeFloat:
-				sig.Table = egress.CANSignalTableFloat
+				sig.Table = message.CANSignalTableFloat
 				sig.ValueFloat = dec.ValueAsFloat()
 
 			case acmelib.SignalValueTypeEnum:
-				sig.Table = egress.CANSignalTableEnum
+				sig.Table = message.CANSignalTableEnum
 				sig.ValueEnum = dec.ValueAsEnum()
 			}
 
@@ -191,11 +196,17 @@ func (w *acmelibWorker) DoWork(ctx context.Context, msgBatch *adapter.CANMessage
 		}
 	}
 
+	span.SetAttributes(attribute.Int("message_count", msgBatch.MessageCount))
+
 	return sigBatch, nil
 }
 
 func (w *acmelibWorker) Stop(_ context.Context) error {
 	return nil
+}
+
+func (w *acmelibWorker) SetTelemetry(tel *internal.Telemetry) {
+	w.tel = tel
 }
 
 type acmelibDecoder struct {

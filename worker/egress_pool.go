@@ -5,10 +5,11 @@ import (
 	"sync"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type EgressPool[W, InitArgs, In any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
-	l *internal.Logger
+type EgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
+	tel *internal.Telemetry
 
 	cfg *PoolConfig
 
@@ -21,15 +22,15 @@ type EgressPool[W, InitArgs, In any, WPtr EgressWorkerPtr[W, InitArgs, In]] stru
 	inputCh chan In
 }
 
-func NewEgressPool[W, InitArgs, In any, WPtr EgressWorkerPtr[W, InitArgs, In]](l *internal.Logger, cfg *PoolConfig) *EgressPool[W, InitArgs, In, WPtr] {
+func NewEgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
-	return &EgressPool[W, InitArgs, In, WPtr]{
-		l: l,
+	return &EgressPool[In, W, InitArgs, WPtr]{
+		tel: tel,
 
 		cfg: cfg,
 
-		scaler: newScaler(l, cfg.toScaler()),
+		scaler: newScaler(tel, cfg.toScaler()),
 
 		wg: &sync.WaitGroup{},
 
@@ -37,7 +38,7 @@ func NewEgressPool[W, InitArgs, In any, WPtr EgressWorkerPtr[W, InitArgs, In]](l
 	}
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
+func (ep *EgressPool[In, W, InitArgs, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
 	ep.initArgs = initArgs
 
 	ep.scaler.init(ctx, ep.cfg.InitialWorkers)
@@ -45,12 +46,12 @@ func (ep *EgressPool[W, InitArgs, In, WPtr]) Init(ctx context.Context, initArgs 
 	return nil
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) Run(ctx context.Context) {
+func (ep *EgressPool[In, W, InitArgs, WPtr]) Run(ctx context.Context) {
 	go ep.runStartWorkerListener(ctx)
 	go ep.scaler.run(ctx)
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) runStartWorkerListener(ctx context.Context) {
+func (ep *EgressPool[In, W, InitArgs, WPtr]) runStartWorkerListener(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -62,12 +63,14 @@ func (ep *EgressPool[W, InitArgs, In, WPtr]) runStartWorkerListener(ctx context.
 	}
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) runWorker(ctx context.Context) {
+func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
+	worker.SetTelemetry(ep.tel)
+
 	if err := worker.Init(ctx, ep.initArgs); err != nil {
-		ep.l.Error("failed to init worker", err)
+		ep.tel.LogError("failed to init worker", err)
 		return
 	}
 
@@ -77,13 +80,13 @@ func (ep *EgressPool[W, InitArgs, In, WPtr]) runWorker(ctx context.Context) {
 	workerID := ep.scaler.notifyWorkerStart()
 	defer ep.scaler.notifyWorkerStop()
 
-	ep.l.Info("starting worker", "worker_id", workerID)
+	ep.tel.LogInfo("starting worker", "worker_id", workerID)
 
 	defer func() {
-		ep.l.Info("stopping worker", "worker_id", workerID)
+		ep.tel.LogInfo("stopping worker", "worker_id", workerID)
 
 		if err := worker.Stop(ctx); err != nil {
-			ep.l.Error("failed to stop worker", err, "worker_id", workerID)
+			ep.tel.LogError("failed to stop worker", err, "worker_id", workerID)
 		}
 	}()
 
@@ -95,19 +98,21 @@ func (ep *EgressPool[W, InitArgs, In, WPtr]) runWorker(ctx context.Context) {
 		case <-ep.scaler.getStopCh(workerID):
 			return
 
-		case dataIn := <-ep.inputCh:
-			if err := worker.DoWork(ctx, dataIn); err != nil {
-				ep.l.Error("failed to do work", err, "worker_id", workerID)
-				continue
+		case msgIn := <-ep.inputCh:
+			tracedCtx, span := ep.tel.NewTrace(msgIn.LoadSpanContext(ctx), "deliver message")
+
+			if err := worker.Deliver(tracedCtx, msgIn); err != nil {
+				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)
 			}
 
 			ep.scaler.notifyTaskCompleted()
+			span.End()
 		}
 	}
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) Stop() {
-	ep.l.Info("stopping worker pool")
+func (ep *EgressPool[In, W, InitArgs, WPtr]) Stop() {
+	ep.tel.LogInfo("stopping worker pool")
 
 	ep.wg.Wait()
 	ep.scaler.stop()
@@ -115,7 +120,7 @@ func (ep *EgressPool[W, InitArgs, In, WPtr]) Stop() {
 	close(ep.inputCh)
 }
 
-func (ep *EgressPool[W, InitArgs, In, WPtr]) AddTask(ctx context.Context, task In) bool {
+func (ep *EgressPool[In, W, InitArgs, WPtr]) AddTask(ctx context.Context, task In) bool {
 	select {
 	case <-ctx.Done():
 		return false

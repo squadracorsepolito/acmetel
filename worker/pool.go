@@ -5,10 +5,13 @@ import (
 	"sync"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type Pool[W, InitArgs, In, Out any, WPtr WorkerPtr[W, InitArgs, In, Out]] struct {
-	l *internal.Logger
+type Pool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitArgs, In, Out]] struct {
+	*withOutput[Out]
+
+	tel *internal.Telemetry
 
 	cfg *PoolConfig
 
@@ -18,24 +21,24 @@ type Pool[W, InitArgs, In, Out any, WPtr WorkerPtr[W, InitArgs, In, Out]] struct
 
 	wg *sync.WaitGroup
 
-	inputCh  chan In
-	outputCh chan Out
+	inputCh chan In
 }
 
-func NewPool[W, InitArgs, In, Out any, WPtr WorkerPtr[W, InitArgs, In, Out]](l *internal.Logger, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
+func NewPool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	return &Pool[W, InitArgs, In, Out, WPtr]{
-		l: l,
+		withOutput: newWithOutput[Out](channelSize),
+
+		tel: tel,
 
 		cfg: cfg,
 
-		scaler: newScaler(l, cfg.toScaler()),
+		scaler: newScaler(tel, cfg.toScaler()),
 
 		wg: &sync.WaitGroup{},
 
-		inputCh:  make(chan In, channelSize),
-		outputCh: make(chan Out, channelSize),
+		inputCh: make(chan In, channelSize),
 	}
 }
 
@@ -68,8 +71,10 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
+	worker.SetTelemetry(p.tel)
+
 	if err := worker.Init(ctx, p.initArgs); err != nil {
-		p.l.Error("failed to init worker", err)
+		p.tel.LogError("failed to init worker", err)
 		return
 	}
 
@@ -79,13 +84,13 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	workerID := p.scaler.notifyWorkerStart()
 	defer p.scaler.notifyWorkerStop()
 
-	p.l.Info("starting worker", "worker_id", workerID)
+	p.tel.LogInfo("starting worker", "worker_id", workerID)
 
 	defer func() {
-		p.l.Info("stopping worker", "worker_id", workerID)
+		p.tel.LogInfo("stopping worker", "worker_id", workerID)
 
 		if err := worker.Stop(ctx); err != nil {
-			p.l.Error("failed to stop worker", err, "worker_id", workerID)
+			p.tel.LogError("failed to stop worker", err, "worker_id", workerID)
 		}
 	}()
 
@@ -97,28 +102,35 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		case <-p.scaler.getStopCh(workerID):
 			return
 
-		case dataIn := <-p.inputCh:
-			res, err := worker.DoWork(ctx, dataIn)
+		case msgIn := <-p.inputCh:
+			tracedCtx, span := p.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle message")
+
+			msgOut, err := worker.Handle(tracedCtx, msgIn)
 			if err != nil {
-				p.l.Error("failed to do work", err, "worker_id", workerID)
-				continue
+				p.tel.LogError("failed to do work", err, "worker_id", workerID)
+				goto loopCleanup
 			}
 
-			p.scaler.notifyTaskCompleted()
+			msgOut.SaveSpan(span)
+			p.sendOutput(msgOut)
+			span.AddEvent("message sent to next stage")
 
-			p.outputCh <- res
+		loopCleanup:
+			p.scaler.notifyTaskCompleted()
+			span.End()
 		}
 	}
 }
 
 func (p *Pool[W, InitArgs, In, Out, WPtr]) Stop() {
-	p.l.Info("stopping worker pool")
+	p.tel.LogInfo("stopping worker pool")
 
 	p.wg.Wait()
 	p.scaler.stop()
 
 	close(p.inputCh)
-	close(p.outputCh)
+
+	p.closeOutput()
 }
 
 func (p *Pool[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In) bool {
@@ -133,8 +145,4 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In)
 	default:
 		return false
 	}
-}
-
-func (p *Pool[W, InitArgs, In, Out, WPtr]) GetOutputCh() <-chan Out {
-	return p.outputCh
 }

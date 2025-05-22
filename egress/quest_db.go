@@ -7,49 +7,10 @@ import (
 	qdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
+	"go.opentelemetry.io/otel/attribute"
 )
-
-type CANSignalBatch struct {
-	Timestamp   time.Time
-	SignalCount int
-	Signals     []CANSignal
-}
-
-type CANSignalTable int
-
-const (
-	CANSignalTableFlag CANSignalTable = iota
-	CANSignalTableInt
-	CANSignalTableFloat
-	CANSignalTableEnum
-)
-
-func (c CANSignalTable) String() string {
-	switch c {
-	case CANSignalTableFlag:
-		return "flag_signals"
-	case CANSignalTableInt:
-		return "int_signals"
-	case CANSignalTableFloat:
-		return "float_signals"
-	case CANSignalTableEnum:
-		return "enum_signals"
-	default:
-		return "unknown"
-	}
-}
-
-type CANSignal struct {
-	CANID      int64
-	Name       string
-	RawValue   int64
-	Table      CANSignalTable
-	ValueFlag  bool
-	ValueInt   int64
-	ValueFloat float64
-	ValueEnum  string
-}
 
 type QuestDBConfig struct {
 	*worker.PoolConfig
@@ -73,20 +34,21 @@ type QuestDB struct {
 
 	senderPool *qdb.LineSenderPool
 
-	in connector.Connector[*CANSignalBatch]
+	in connector.Connector[*message.CANSignalBatch]
 
 	workerPool *questDBWorkerPool
 }
 
 func NewQuestDB(cfg *QuestDBConfig) *QuestDB {
-	l := internal.NewLogger("egress", "quest_db")
+	tel := internal.NewTelemetry("egress", "quest_db")
+	l := tel.Logger()
 
 	return &QuestDB{
 		l: l,
 
 		cfg: cfg,
 
-		workerPool: newQuestDBWorkerPool(l, cfg.PoolConfig),
+		workerPool: newQuestDBWorkerPool(tel, cfg.PoolConfig),
 	}
 }
 
@@ -94,7 +56,7 @@ func (e *QuestDB) Init(ctx context.Context) error {
 	senderPool, err := qdb.PoolFromOptions(
 		qdb.WithAddress(e.cfg.Address),
 		qdb.WithHttp(),
-		qdb.WithAutoFlushRows(100_000),
+		qdb.WithAutoFlushRows(128_000),
 		qdb.WithRetryTimeout(time.Second),
 	)
 	if err != nil {
@@ -103,7 +65,7 @@ func (e *QuestDB) Init(ctx context.Context) error {
 
 	e.senderPool = senderPool
 
-	if err := e.workerPool.Init(ctx, senderPool); err != nil {
+	if err := e.workerPool.Init(ctx, e.senderPool); err != nil {
 		return err
 	}
 
@@ -142,17 +104,18 @@ func (e *QuestDB) Stop() {
 	}
 }
 
-func (e *QuestDB) SetInput(connector connector.Connector[*CANSignalBatch]) {
+func (e *QuestDB) SetInput(connector connector.Connector[*message.CANSignalBatch]) {
 	e.in = connector
 }
 
-type questDBWorkerPool = worker.EgressPool[questDBWorker, *qdb.LineSenderPool, *CANSignalBatch, *questDBWorker]
+type questDBWorkerPool = worker.EgressPool[*message.CANSignalBatch, questDBWorker, *qdb.LineSenderPool, *questDBWorker]
 
-func newQuestDBWorkerPool(l *internal.Logger, cfg *worker.PoolConfig) *questDBWorkerPool {
-	return worker.NewEgressPool[questDBWorker, *qdb.LineSenderPool, *CANSignalBatch](l, cfg)
+func newQuestDBWorkerPool(tel *internal.Telemetry, cfg *worker.PoolConfig) *questDBWorkerPool {
+	return worker.NewEgressPool[*message.CANSignalBatch, questDBWorker, *qdb.LineSenderPool](tel, cfg)
 }
 
 type questDBWorker struct {
+	tel    *internal.Telemetry
 	sender qdb.LineSender
 }
 
@@ -167,7 +130,14 @@ func (w *questDBWorker) Init(ctx context.Context, senderPool *qdb.LineSenderPool
 	return nil
 }
 
-func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error {
+func (w *questDBWorker) Deliver(ctx context.Context, data *message.CANSignalBatch) error {
+	defer message.PutCANSignalBatch(data)
+
+	ctx, span := w.tel.NewTrace(ctx, "insert CAN signals")
+	defer span.End()
+
+	span.SetAttributes(attribute.Int("signal_count", data.SignalCount))
+
 	timestamp := data.Timestamp
 
 	for i := range data.SignalCount {
@@ -177,7 +147,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error 
 
 		table := sig.Table
 		switch table {
-		case CANSignalTableFlag:
+		case message.CANSignalTableFlag:
 			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
@@ -185,7 +155,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error 
 				BoolColumn("flag_value", sig.ValueFlag).
 				At(ctx, timestamp)
 
-		case CANSignalTableInt:
+		case message.CANSignalTableInt:
 			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
@@ -193,7 +163,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error 
 				Int64Column("integer_value", sig.ValueInt).
 				At(ctx, timestamp)
 
-		case CANSignalTableFloat:
+		case message.CANSignalTableFloat:
 			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
@@ -201,7 +171,7 @@ func (w *questDBWorker) DoWork(ctx context.Context, data *CANSignalBatch) error 
 				Float64Column("decimal_value", sig.ValueFloat).
 				At(ctx, timestamp)
 
-		case CANSignalTableEnum:
+		case message.CANSignalTableEnum:
 			err = w.sender.Table(table.String()).
 				Symbol("name", sig.Name).
 				Int64Column("can_id", sig.CANID).
@@ -225,4 +195,8 @@ func (w *questDBWorker) Stop(ctx context.Context) error {
 	default:
 		return w.sender.Close(ctx)
 	}
+}
+
+func (w *questDBWorker) SetTelemetry(tel *internal.Telemetry) {
+	w.tel = tel
 }

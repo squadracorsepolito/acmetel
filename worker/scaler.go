@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"go.opentelemetry.io/otel/metric"
 )
 
 type scalerCfg struct {
@@ -19,7 +20,7 @@ type scalerCfg struct {
 }
 
 type scaler struct {
-	l *internal.Logger
+	tel *internal.Telemetry
 
 	cfg *scalerCfg
 
@@ -30,16 +31,22 @@ type scaler struct {
 	activeWorkers atomic.Int32
 
 	pendingTasks atomic.Int64
+
+	metricPendigTasks   metric.Int64UpDownCounter
+	metricActiveWorkers metric.Int64UpDownCounter
 }
 
-func newScaler(l *internal.Logger, cfg *scalerCfg) *scaler {
+func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
 	return &scaler{
-		l: l,
+		tel: tel,
 
 		cfg: cfg,
 
 		startCh:    make(chan struct{}, cfg.maxWorkers),
 		stopChList: make([]chan struct{}, 0, cfg.maxWorkers),
+
+		metricPendigTasks:   tel.NewUpDownCounter("pending_tasks"),
+		metricActiveWorkers: tel.NewUpDownCounter("active_workers"),
 	}
 }
 
@@ -82,7 +89,7 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 	// Calculate queue depth per worker
 	queueDepthPerWorker := float64(pendingTasks) / float64(currWorkers)
 
-	s.l.Info("auto-scaling metrics",
+	s.tel.LogInfo("auto-scaling metrics",
 		"active_workers", activeWorkers,
 		"pending_tasks", pendingTasks,
 		"queue_depth_per_worker", queueDepthPerWorker,
@@ -95,7 +102,7 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 		targetWorkers := min(currWorkers+workersToAdd, s.cfg.maxWorkers)
 
 		if targetWorkers > currWorkers {
-			s.l.Info("scaling up", "from", currWorkers, "to", targetWorkers)
+			s.tel.LogInfo("scaling up", "from", currWorkers, "to", targetWorkers)
 			s.scaleWorkers(ctx, int(targetWorkers))
 		}
 
@@ -109,7 +116,7 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 		targetWorkers := max(currWorkers-workersToRemove, s.cfg.minWorkers)
 
 		if targetWorkers < currWorkers {
-			s.l.Info("scaling down", "from", currWorkers, "to", targetWorkers)
+			s.tel.LogInfo("scaling down", "from", currWorkers, "to", targetWorkers)
 			s.scaleWorkers(ctx, int(targetWorkers))
 		}
 	}
@@ -162,19 +169,23 @@ func (s *scaler) stop() {
 
 func (s *scaler) notifyWorkerStart() int {
 	workerID := int(s.activeWorkers.Add(1)) - 1
+	s.metricActiveWorkers.Add(context.Background(), 1)
 	return workerID
 }
 
 func (s *scaler) notifyWorkerStop() {
 	s.activeWorkers.Add(-1)
+	s.metricActiveWorkers.Add(context.Background(), -1)
 }
 
 func (s *scaler) notifyTaskAdded() {
 	s.pendingTasks.Add(1)
+	s.metricPendigTasks.Add(context.Background(), 1)
 }
 
 func (s *scaler) notifyTaskCompleted() {
 	s.pendingTasks.Add(-1)
+	s.metricPendigTasks.Add(context.Background(), -1)
 }
 
 func (s *scaler) getStopCh(workerID int) <-chan struct{} {

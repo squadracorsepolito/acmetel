@@ -8,54 +8,11 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
+	"go.opentelemetry.io/otel/attribute"
 )
-
-const (
-	// maximum number of CAN 2.0 messages (8 bytes payload) that can be sent in a single udp/ipv4/ethernet packet
-	defaultCANMessageNum = 113
-)
-
-type CANMessage struct {
-	CANID   uint32
-	DataLen int
-	RawData []byte
-}
-
-type CANMessageBatch struct {
-	Timestamp    time.Time
-	MessageCount int
-	Messages     []CANMessage
-}
-
-type CANMessageBatchPool struct {
-	pool *sync.Pool
-}
-
-var CANMessageBatchPoolInstance = newCANMessageBatchPool()
-
-func newCANMessageBatchPool() *CANMessageBatchPool {
-	return &CANMessageBatchPool{
-		pool: &sync.Pool{
-			New: func() any {
-				return &CANMessageBatch{
-					MessageCount: 0,
-					Messages:     make([]CANMessage, defaultCANMessageNum),
-				}
-			},
-		},
-	}
-}
-
-func (p *CANMessageBatchPool) Get() *CANMessageBatch {
-	return p.pool.Get().(*CANMessageBatch)
-}
-
-func (p *CANMessageBatchPool) Put(b *CANMessageBatch) {
-	p.pool.Put(b)
-}
 
 type CannelloniConfig struct {
 	*worker.PoolConfig
@@ -68,27 +25,33 @@ func NewDefaultCannelloniConfig() *CannelloniConfig {
 }
 
 type Cannelloni struct {
-	l     *internal.Logger
+	l   *internal.Logger
+	tel *internal.Telemetry
+
 	stats *internal.Stats
 
-	in connector.Connector[*ingress.UDPData]
+	in connector.Connector[*message.UDPPayload]
 
 	writerWg *sync.WaitGroup
-	out      connector.Connector[*CANMessageBatch]
+	out      connector.Connector[*message.RawCANMessageBatch]
 
 	workerPool *cannelloniWorkerPool
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
-	l := internal.NewLogger("adapter", "cannelloni")
+	tel := internal.NewTelemetry("adapter", "cannelloni")
+
+	l := tel.Logger()
 
 	return &Cannelloni{
-		l:     l,
+		l:   l,
+		tel: tel,
+
 		stats: internal.NewStats(l),
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: worker.NewPool[cannelloniWorker, any, *ingress.UDPData, *CANMessageBatch](l, cfg.PoolConfig),
+		workerPool: worker.NewPool[cannelloniWorker, any, *message.UDPPayload, *message.RawCANMessageBatch](tel, cfg.PoolConfig),
 	}
 }
 
@@ -138,18 +101,18 @@ func (c *Cannelloni) Run(ctx context.Context) {
 		default:
 		}
 
-		data, err := c.in.Read()
+		udpPayload, err := c.in.Read()
 		if err != nil {
 			c.l.Warn("failed to read from input connector", "reason", err)
 			continue
 		}
 
 		c.stats.IncrementItemCount()
-		c.stats.IncrementByteCountBy(len(data.Frame))
+		c.stats.IncrementByteCountBy(udpPayload.DataLen)
 
 		received++
 
-		if !c.workerPool.AddTask(ctx, data) {
+		if !c.workerPool.AddTask(ctx, udpPayload) {
 			skipped++
 		}
 	}
@@ -163,11 +126,11 @@ func (c *Cannelloni) Stop() {
 	c.writerWg.Wait()
 }
 
-func (c *Cannelloni) SetInput(connector connector.Connector[*ingress.UDPData]) {
+func (c *Cannelloni) SetInput(connector connector.Connector[*message.UDPPayload]) {
 	c.in = connector
 }
 
-func (c *Cannelloni) SetOutput(connector connector.Connector[*CANMessageBatch]) {
+func (c *Cannelloni) SetOutput(connector connector.Connector[*message.RawCANMessageBatch]) {
 	c.out = connector
 }
 
@@ -186,45 +149,53 @@ type cannelloniFrame struct {
 	messages       []cannelloniFrameMessage
 }
 
-type cannelloniWorkerPool = worker.Pool[cannelloniWorker, any, *ingress.UDPData, *CANMessageBatch, *cannelloniWorker]
+type cannelloniWorkerPool = worker.Pool[cannelloniWorker, any, *message.UDPPayload, *message.RawCANMessageBatch, *cannelloniWorker]
 
 type cannelloniWorker struct {
+	tel *internal.Telemetry
 }
 
 func (w *cannelloniWorker) Init(_ context.Context, _ any) error {
 	return nil
 }
 
-func (w *cannelloniWorker) DoWork(_ context.Context, udpData *ingress.UDPData) (*CANMessageBatch, error) {
-	f, err := w.decodeFrame(udpData.Frame)
+func (w *cannelloniWorker) Handle(ctx context.Context, udpPayload *message.UDPPayload) (*message.RawCANMessageBatch, error) {
+	ctx, span := w.tel.NewTrace(ctx, "process cannelloni frame")
+	defer span.End()
+
+	f, err := w.decodeFrame(udpPayload.Data)
 	if err != nil {
 		return nil, err
 	}
 
-	// ingress.UDPDataPoolInstance.Put(udpData)
-
-	msgBatch := CANMessageBatchPoolInstance.Get()
+	msgBatch := message.NewRawCANMessageBatch()
 	msgBatch.Timestamp = time.Now()
 
 	messageCount := len(f.messages)
 	msgBatch.MessageCount = messageCount
-	if messageCount > defaultCANMessageNum {
-		msgBatch.Messages = make([]CANMessage, messageCount)
+	if messageCount > message.DefaultCANMessageNum {
+		msgBatch.Messages = make([]message.RawCANMessage, messageCount)
 	}
 
 	for idx, tmpMsg := range f.messages {
-		msgBatch.Messages[idx] = CANMessage{
+		msgBatch.Messages[idx] = message.RawCANMessage{
 			CANID:   tmpMsg.canID,
 			DataLen: int(tmpMsg.dataLen),
 			RawData: tmpMsg.data,
 		}
 	}
 
+	span.SetAttributes(attribute.Int("message_count", messageCount))
+
 	return msgBatch, nil
 }
 
 func (w *cannelloniWorker) Stop(_ context.Context) error {
 	return nil
+}
+
+func (w *cannelloniWorker) SetTelemetry(tel *internal.Telemetry) {
+	w.tel = tel
 }
 
 func (w *cannelloniWorker) decodeFrame(buf []byte) (*cannelloniFrame, error) {
