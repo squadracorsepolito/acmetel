@@ -2,23 +2,35 @@ package message
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 )
 
-type Traceable interface {
+type Message interface {
+	SetReceiveTime(receiveTime time.Time)
+	ReceiveTime() time.Time
 	SaveSpan(span trace.Span)
 	LoadSpanContext(ctx context.Context) context.Context
 }
 
 type embedded struct {
-	Span trace.SpanContext
+	receiveTime time.Time
+	span        trace.SpanContext
+}
+
+func (e *embedded) SetReceiveTime(receiveTime time.Time) {
+	e.receiveTime = receiveTime
+}
+
+func (e *embedded) ReceiveTime() time.Time {
+	return e.receiveTime
 }
 
 func (e *embedded) SaveSpan(span trace.Span) {
-	e.Span = span.SpanContext()
+	e.span = span.SpanContext()
 }
 
 func (e *embedded) LoadSpanContext(ctx context.Context) context.Context {
-	return trace.ContextWithSpanContext(ctx, e.Span)
+	return trace.ContextWithSpanContext(ctx, e.span)
 }

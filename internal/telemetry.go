@@ -2,7 +2,6 @@ package internal
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -48,7 +47,7 @@ func (t *Telemetry) LogError(msg string, err error, args ...any) {
 	t.l.Error(msg, err, args...)
 }
 
-func (t *Telemetry) setDefaultAttributes(span trace.Span) {
+func (t *Telemetry) setSpanDefaultAttributes(span trace.Span) {
 	span.SetAttributes(
 		attribute.String("acmetel.stage_kind", t.stageKind),
 		attribute.String("acmetel.stage_name", t.stageName),
@@ -57,34 +56,74 @@ func (t *Telemetry) setDefaultAttributes(span trace.Span) {
 
 func (t *Telemetry) NewTrace(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
 	ctx, span := t.tracer.Start(ctx, spanName, opts...)
-	t.setDefaultAttributes(span)
+	t.setSpanDefaultAttributes(span)
 	return ctx, span
 }
 
-func (t *Telemetry) getMeterName(name string) string {
-	return fmt.Sprintf("%s_%s_%s", t.stageKind, t.stageName, name)
+func (t *Telemetry) getMetricDefaultAttributes() metric.MeasurementOption {
+	return metric.WithAttributes(
+		attribute.String("acmetel.stage_kind", t.stageKind),
+		attribute.String("acmetel.stage_name", t.stageName),
+	)
 }
 
-func (t *Telemetry) NewCounter(name string, opts ...metric.Int64CounterOption) metric.Int64Counter {
-	counterName := t.getMeterName(name)
-	counter, err := t.meter.Int64Counter(counterName, opts...)
+func (t *Telemetry) NewCounter(name string, getter func() int64, opts ...metric.Int64ObservableCounterOption) {
+	counter, err := t.meter.Int64ObservableCounter(name, opts...)
 	if err != nil {
-		t.LogError("failed to create counter", err, "name", name)
+		t.LogError("failed to create async counter", err, "name", name)
 	}
 
-	t.LogInfo("created counter", "name", counterName)
+	_, err = t.meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(counter, getter(), t.getMetricDefaultAttributes())
+		return nil
+	}, counter)
 
-	return counter
+	if err != nil {
+		t.LogError("failed to register callback", err, "name", name)
+	}
+
+	t.LogInfo("created async counter", "name", name)
 }
 
-func (t *Telemetry) NewUpDownCounter(name string, opts ...metric.Int64UpDownCounterOption) metric.Int64UpDownCounter {
-	counterName := t.getMeterName(name)
-	counter, err := t.meter.Int64UpDownCounter(counterName, opts...)
+func (t *Telemetry) NewUpDownCounter(name string, getter func() int64, opts ...metric.Int64ObservableUpDownCounterOption) {
+	counter, err := t.meter.Int64ObservableUpDownCounter(name, opts...)
 	if err != nil {
-		t.LogError("failed to create up/down counter", err, "name", name)
+		t.LogError("failed to create async up/down counter", err, "name", name)
 	}
 
-	t.LogInfo("created up/down counter", "name", counterName)
+	_, err = t.meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(counter, getter(), t.getMetricDefaultAttributes())
+		return nil
+	}, counter)
 
-	return counter
+	if err != nil {
+		t.LogError("failed to register callback", err, "name", name)
+	}
+
+	t.LogInfo("created async up/down counter", "name", name)
+}
+
+type Histogram struct {
+	histogram    metric.Int64Histogram
+	attibutesOpt metric.MeasurementOption
+}
+
+func newHistogram(histogram metric.Int64Histogram, attibutesOpt metric.MeasurementOption) *Histogram {
+	return &Histogram{
+		histogram:    histogram,
+		attibutesOpt: attibutesOpt,
+	}
+}
+
+func (h *Histogram) Record(ctx context.Context, value int64) {
+	h.histogram.Record(ctx, value, h.attibutesOpt)
+}
+
+func (t *Telemetry) NewHistogram(name string, opts ...metric.Int64HistogramOption) *Histogram {
+	histogram, err := t.meter.Int64Histogram(name, opts...)
+	if err != nil {
+		t.LogError("failed to create histogram", err, "name", name)
+	}
+	t.LogInfo("created histogram", "name", name)
+	return newHistogram(histogram, t.getMetricDefaultAttributes())
 }

@@ -4,11 +4,11 @@ import (
 	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type withOutput[T message.Traceable] struct {
+type withOutput[T message.Message] struct {
 	ch chan T
 }
 
-func newWithOutput[T message.Traceable](chSize int) *withOutput[T] {
+func newWithOutput[T message.Message](chSize int) *withOutput[T] {
 	return &withOutput[T]{
 		ch: make(chan T, chSize),
 	}

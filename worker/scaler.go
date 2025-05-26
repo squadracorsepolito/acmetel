@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
-	"go.opentelemetry.io/otel/metric"
 )
 
 type scalerCfg struct {
@@ -31,9 +30,6 @@ type scaler struct {
 	activeWorkers atomic.Int32
 
 	pendingTasks atomic.Int64
-
-	metricPendigTasks   metric.Int64UpDownCounter
-	metricActiveWorkers metric.Int64UpDownCounter
 }
 
 func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
@@ -44,10 +40,17 @@ func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
 
 		startCh:    make(chan struct{}, cfg.maxWorkers),
 		stopChList: make([]chan struct{}, 0, cfg.maxWorkers),
-
-		metricPendigTasks:   tel.NewUpDownCounter("pending_tasks"),
-		metricActiveWorkers: tel.NewUpDownCounter("active_workers"),
 	}
+}
+
+func (s *scaler) initMetrics() {
+	s.tel.NewUpDownCounter("worker_pool_pending_tasks", func() int64 {
+		return s.pendingTasks.Load()
+	})
+
+	s.tel.NewUpDownCounter("worker_pool_active_workers", func() int64 {
+		return int64(s.activeWorkers.Load())
+	})
 }
 
 func (s *scaler) init(ctx context.Context, initialWorkers int) {
@@ -60,6 +63,8 @@ func (s *scaler) init(ctx context.Context, initialWorkers int) {
 	}
 
 	s.currWorkers.Store(int32(initialWorkers))
+
+	s.initMetrics()
 }
 
 func (s *scaler) run(ctx context.Context) {
@@ -169,23 +174,19 @@ func (s *scaler) stop() {
 
 func (s *scaler) notifyWorkerStart() int {
 	workerID := int(s.activeWorkers.Add(1)) - 1
-	s.metricActiveWorkers.Add(context.Background(), 1)
 	return workerID
 }
 
 func (s *scaler) notifyWorkerStop() {
 	s.activeWorkers.Add(-1)
-	s.metricActiveWorkers.Add(context.Background(), -1)
 }
 
 func (s *scaler) notifyTaskAdded() {
 	s.pendingTasks.Add(1)
-	s.metricPendigTasks.Add(context.Background(), 1)
 }
 
 func (s *scaler) notifyTaskCompleted() {
 	s.pendingTasks.Add(-1)
-	s.metricPendigTasks.Add(context.Background(), -1)
 }
 
 func (s *scaler) getStopCh(workerID int) <-chan struct{} {

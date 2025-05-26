@@ -3,12 +3,13 @@ package worker
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type Pool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitArgs, In, Out]] struct {
+type Pool[W, InitArgs any, In, Out message.Message, WPtr WorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -22,9 +23,12 @@ type Pool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitArgs
 	wg *sync.WaitGroup
 
 	inputCh chan In
+
+	handledMessages atomic.Int64
+	handlingErrors  atomic.Int64
 }
 
-func NewPool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
+func NewPool[W, InitArgs any, In, Out message.Message, WPtr WorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	return &Pool[W, InitArgs, In, Out, WPtr]{
@@ -43,11 +47,16 @@ func NewPool[W, InitArgs any, In, Out message.Traceable, WPtr WorkerPtr[W, InitA
 }
 
 func (p *Pool[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
-	p.initArgs = initArgs
+	p.initMetrics()
 
+	p.initArgs = initArgs
 	p.scaler.init(ctx, p.cfg.InitialWorkers)
 
 	return nil
+}
+
+func (p *Pool[W, InitArgs, In, Out, WPtr]) initMetrics() {
+	p.tel.NewCounter("worker_pool_handled_messages", func() int64 { return p.handledMessages.Load() })
 }
 
 func (p *Pool[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
@@ -105,14 +114,23 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-p.inputCh:
 			tracedCtx, span := p.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle message")
 
+			receiveTime := msgIn.ReceiveTime()
+
 			msgOut, err := worker.Handle(tracedCtx, msgIn)
 			if err != nil {
 				p.tel.LogError("failed to do work", err, "worker_id", workerID)
+				p.handlingErrors.Add(1)
+
 				goto loopCleanup
 			}
 
+			msgOut.SetReceiveTime(receiveTime)
+
+			p.handledMessages.Add(1)
 			msgOut.SaveSpan(span)
+
 			p.sendOutput(msgOut)
+
 			span.AddEvent("message sent to next stage")
 
 		loopCleanup:

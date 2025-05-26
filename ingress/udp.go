@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"time"
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
@@ -177,6 +178,8 @@ func (w *udpWorker) Receive(ctx context.Context) (*message.UDPPayload, bool, err
 
 	span.SetAttributes(attribute.Int("data_len", dataLen))
 	payload.SaveSpan(span)
+
+	payload.SetReceiveTime(time.Now())
 
 	return payload, false, nil
 }

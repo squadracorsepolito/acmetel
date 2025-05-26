@@ -3,13 +3,13 @@ package worker
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/message"
-	"go.opentelemetry.io/otel/metric"
 )
 
-type IngressPool[W, InitArgs any, Out message.Traceable, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
+type IngressPool[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -20,10 +20,11 @@ type IngressPool[W, InitArgs any, Out message.Traceable, WPtr IngressWorkerPtr[W
 
 	wg *sync.WaitGroup
 
-	receivedMessageCounter metric.Int64Counter
+	receivedMessages atomic.Int64
+	receivingErrors  atomic.Int64
 }
 
-func NewIngressPool[W, InitArgs any, Out message.Traceable, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *PoolConfig) *IngressPool[W, InitArgs, Out, WPtr] {
+func NewIngressPool[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *PoolConfig) *IngressPool[W, InitArgs, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	return &IngressPool[W, InitArgs, Out, WPtr]{
@@ -34,14 +35,19 @@ func NewIngressPool[W, InitArgs any, Out message.Traceable, WPtr IngressWorkerPt
 		cfg: cfg,
 
 		wg: &sync.WaitGroup{},
-
-		receivedMessageCounter: tel.NewCounter("received_message_count"),
 	}
 }
 
 func (ip *IngressPool[W, InitArgs, Out, WPtr]) Init(_ context.Context, initArgs InitArgs) error {
+	ip.initMetrics()
+
 	ip.initArgs = initArgs
 	return nil
+}
+
+func (ip *IngressPool[W, InitArgs, Out, WPtr]) initMetrics() {
+	ip.tel.NewCounter("worker_pool_received_messages", func() int64 { return ip.receivedMessages.Load() })
+	ip.tel.NewCounter("worker_pool_receiving_errors", func() int64 { return ip.receivingErrors.Load() })
 }
 
 func (ip *IngressPool[W, InitArgs, Out, WPtr]) Run(ctx context.Context) {
@@ -80,10 +86,12 @@ func (ip *IngressPool[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 		msgOut, stop, err := worker.Receive(tracedCtx)
 		if err != nil {
 			ip.tel.LogError("failed to receive message", err)
+			ip.receivingErrors.Add(1)
+
 			goto loopCleanup
 		}
 
-		ip.receivedMessageCounter.Add(tracedCtx, 1)
+		ip.receivedMessages.Add(1)
 
 		ip.sendOutput(msgOut)
 

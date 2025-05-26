@@ -3,12 +3,15 @@ package worker
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/message"
+	"go.opentelemetry.io/otel/metric"
 )
 
-type EgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
+type EgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
 	tel *internal.Telemetry
 
 	cfg *PoolConfig
@@ -20,10 +23,14 @@ type EgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W, I
 	wg *sync.WaitGroup
 
 	inputCh chan In
+
+	deliveredMessages   atomic.Int64
+	deliveringErrors    atomic.Int64
+	messageTotHistogram *internal.Histogram
 }
 
-func NewEgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
-	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
+func NewEgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
+	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 8
 
 	return &EgressPool[In, W, InitArgs, WPtr]{
 		tel: tel,
@@ -39,11 +46,19 @@ func NewEgressPool[In message.Traceable, W, InitArgs any, WPtr EgressWorkerPtr[W
 }
 
 func (ep *EgressPool[In, W, InitArgs, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
-	ep.initArgs = initArgs
+	ep.initMetrics()
 
+	ep.initArgs = initArgs
 	ep.scaler.init(ctx, ep.cfg.InitialWorkers)
 
 	return nil
+}
+
+func (ep *EgressPool[In, W, InitArgs, WPtr]) initMetrics() {
+	ep.tel.NewCounter("worker_pool_delivered_messages", func() int64 { return ep.deliveredMessages.Load() })
+	ep.tel.NewCounter("worker_pool_delivering_errors", func() int64 { return ep.deliveringErrors.Load() })
+
+	ep.messageTotHistogram = ep.tel.NewHistogram("total_message_processing_time", metric.WithUnit("ms"))
 }
 
 func (ep *EgressPool[In, W, InitArgs, WPtr]) Run(ctx context.Context) {
@@ -101,10 +116,20 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-ep.inputCh:
 			tracedCtx, span := ep.tel.NewTrace(msgIn.LoadSpanContext(ctx), "deliver message")
 
+			receiveTime := msgIn.ReceiveTime()
+
 			if err := worker.Deliver(tracedCtx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)
+				ep.deliveringErrors.Add(1)
+
+				goto loopCleanup
 			}
 
+			ep.deliveredMessages.Add(1)
+
+			ep.messageTotHistogram.Record(tracedCtx, time.Since(receiveTime).Milliseconds())
+
+		loopCleanup:
 			ep.scaler.notifyTaskCompleted()
 			span.End()
 		}
