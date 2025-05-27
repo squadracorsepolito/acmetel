@@ -1,0 +1,284 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 5,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "questdb-questdb-datasource",
+        "uid": "belzyqfwxtekgd"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 50,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 11,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "builderOptions": {
+            "fields": [
+              "integer_value"
+            ],
+            "filters": [
+              {
+                "condition": "AND",
+                "filterType": "custom",
+                "key": "name",
+                "operator": "=",
+                "type": "SYMBOL",
+                "value": "message_0_signal_0"
+              }
+            ],
+            "groupBy": [],
+            "limit": "",
+            "metrics": [
+              {
+                "aggregation": "avg",
+                "alias": "avg_value",
+                "field": "raw_value"
+              }
+            ],
+            "mode": "trend",
+            "orderBy": [],
+            "partitionBy": [],
+            "sampleByAlignTo": "CALENDAR",
+            "table": "int_signals",
+            "timeField": "timestamp"
+          },
+          "datasource": {
+            "type": "questdb-questdb-datasource",
+            "uid": "belzyqfwxtekgd"
+          },
+          "queryType": "builder",
+          "rawSql": "SELECT timestamp as time,  avg(raw_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND  name = 'message_0_signal_0' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR",
+          "refId": "A"
+        }
+      ],
+      "title": "Test Signal 0",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "questdb-questdb-datasource",
+        "uid": "belzyqfwxtekgd"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 50,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 12,
+        "x": 11,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "builderOptions": {
+            "fields": [],
+            "filters": [
+              {
+                "condition": "AND",
+                "filterType": "custom",
+                "key": "name",
+                "operator": "=",
+                "type": "SYMBOL",
+                "value": "message_0_signal_1"
+              }
+            ],
+            "groupBy": [],
+            "limit": "",
+            "metrics": [
+              {
+                "aggregation": "avg",
+                "alias": "avg_value",
+                "field": "integer_value"
+              }
+            ],
+            "mode": "trend",
+            "orderBy": [],
+            "partitionBy": [],
+            "sampleByAlignTo": "CALENDAR",
+            "table": "int_signals",
+            "timeField": "timestamp"
+          },
+          "queryType": "builder",
+          "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND  name = 'message_0_signal_1' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR",
+          "refId": "A"
+        }
+      ],
+      "title": "Test Signal 1",
+      "type": "timeseries"
+    }
+  ],
+  "preload": false,
+  "refresh": "auto",
+  "schemaVersion": 41,
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Signals",
+  "uid": "6e486a73-1385-49c5-955a-f419cf19d82e",
+  "version": 5
+}
