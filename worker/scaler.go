@@ -142,20 +142,20 @@ func (s *scaler) sendStop(ctx context.Context, id int) {
 }
 
 func (s *scaler) scaleWorkers(ctx context.Context, targetCount int) {
-	currWorkerCount := int(s.currWorkers.Load())
+	currWorkerCount := int(s.currWorkers.Swap(int32(targetCount)))
 	delta := targetCount - currWorkerCount
 
 	if delta == 0 {
 		return
 	}
 
-	s.currWorkers.Store(int32(targetCount))
-
 	// Check if it has to scale up worker
 	if delta > 0 {
 		for range delta {
 			s.sendStart(ctx)
 		}
+
+		return
 	}
 
 	// Scale down

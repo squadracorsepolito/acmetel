@@ -9,7 +9,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type Pool[W, InitArgs any, In, Out message.Message, WPtr WorkerPtr[W, InitArgs, In, Out]] struct {
+type Pool[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -28,8 +28,8 @@ type Pool[W, InitArgs any, In, Out message.Message, WPtr WorkerPtr[W, InitArgs, 
 	handlingErrors  atomic.Int64
 }
 
-func NewPool[W, InitArgs any, In, Out message.Message, WPtr WorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
-	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
+func NewPool[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
+	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &Pool[W, InitArgs, In, Out, WPtr]{
 		withOutput: newWithOutput[Out](channelSize),

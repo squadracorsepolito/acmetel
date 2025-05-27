@@ -10,12 +10,11 @@ import (
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel"
-	"github.com/squadracorsepolito/acmetel/adapter"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/egress"
+	"github.com/squadracorsepolito/acmetel/handler"
 	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/message"
-	"github.com/squadracorsepolito/acmetel/processor"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -45,33 +44,35 @@ func main() {
 	otel.SetMeterProvider(meterProvider)
 
 	ingressToAdapter := connector.NewRingBuffer[*message.UDPPayload](16_000)
-	adapterToProc := connector.NewRingBuffer[*message.RawCANMessageBatch](16_000)
-	procToEgress := connector.NewRingBuffer[*message.CANSignalBatch](16_000)
+	cannelloniToCAN := connector.NewRingBuffer[*message.RawCANMessageBatch](16_000)
+	canToEgress := connector.NewRingBuffer[*message.CANSignalBatch](16_000)
 
 	ingressCfg := ingress.NewDefaultUDPConfig()
 	ingress := ingress.NewUDP(ingressCfg)
 	ingress.SetOutput(ingressToAdapter)
 
-	cannelloniCfg := adapter.NewDefaultCannelloniConfig()
-	adapter := adapter.NewCannelloni(cannelloniCfg)
-	adapter.SetInput(ingressToAdapter)
-	adapter.SetOutput(adapterToProc)
+	cannelloniCfg := handler.NewDefaultCannelloniConfig()
+	cannelloniHandler := handler.NewCannelloni(cannelloniCfg)
+	cannelloniHandler.SetInput(ingressToAdapter)
+	cannelloniHandler.SetOutput(cannelloniToCAN)
 
-	acmelibCfg := processor.NewDefaultAcmelibConfig()
-	acmelibCfg.Messages = getMessages()
-	proc := processor.NewAcmelib(acmelibCfg)
-	proc.SetInput(adapterToProc)
-	proc.SetOutput(procToEgress)
+	canCfg := handler.NewDefaultCANConfig()
+	canCfg.Messages = getMessages()
+	canHandler := handler.NewCAN(canCfg)
+	canHandler.SetInput(cannelloniToCAN)
+	canHandler.SetOutput(canToEgress)
 
 	egressCfg := egress.NewDefaultQuestDBConfig()
+	egressCfg.MaxWorkers = 32
+	egressCfg.QueueDepthPerWorker = 1
 	egress := egress.NewQuestDB(egressCfg)
-	egress.SetInput(procToEgress)
+	egress.SetInput(canToEgress)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(ingress)
-	pipeline.AddStage(adapter)
-	pipeline.AddStage(proc)
+	pipeline.AddStage(cannelloniHandler)
+	pipeline.AddStage(canHandler)
 	pipeline.AddStage(egress)
 
 	if err := pipeline.Init(ctx); err != nil {
@@ -150,7 +151,7 @@ func newTraceProvider(resource *resource.Resource, exporter sdktrace.SpanExporte
 	return sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(resource),
-		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.1)),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.05)),
 	)
 }
 

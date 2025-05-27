@@ -30,7 +30,7 @@ type EgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, Ini
 }
 
 func NewEgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
-	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 8
+	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &EgressPool[In, W, InitArgs, WPtr]{
 		tel: tel,

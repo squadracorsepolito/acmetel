@@ -27,7 +27,7 @@ type HandlerWorker[InitArgs, In, Out any] interface {
 	Handle(ctx context.Context, task In) (Out, error)
 }
 
-type WorkerPtr[W, InitArgs, In, Out any] interface {
+type HandlerWorkerPtr[W, InitArgs, In, Out any] interface {
 	*W
 	HandlerWorker[InitArgs, In, Out]
 }

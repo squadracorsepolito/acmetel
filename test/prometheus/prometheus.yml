@@ -14,3 +14,10 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+
+  # Scrape metrics from QuestDB
+  - job_name: 'questdb'
+    static_configs:
+      - targets: ['questdb:9003']
+    scrape_interval: 5s
+    metrics_path: /metrics

@@ -1,13 +1,11 @@
-package adapter
+package handler
 
 import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"sync"
 	"time"
 
-	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
@@ -25,113 +23,25 @@ func NewDefaultCannelloniConfig() *CannelloniConfig {
 }
 
 type Cannelloni struct {
-	l   *internal.Logger
-	tel *internal.Telemetry
-
-	stats *internal.Stats
-
-	in connector.Connector[*message.UDPPayload]
-
-	writerWg *sync.WaitGroup
-	out      connector.Connector[*message.RawCANMessageBatch]
-
-	workerPool *cannelloniWorkerPool
+	*stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
-	tel := internal.NewTelemetry("adapter", "cannelloni")
-
-	l := tel.Logger()
-
 	return &Cannelloni{
-		l:   l,
-		tel: tel,
-
-		stats: internal.NewStats(l),
-
-		writerWg: &sync.WaitGroup{},
-
-		workerPool: worker.NewPool[cannelloniWorker, any, *message.UDPPayload, *message.RawCANMessageBatch](tel, cfg.PoolConfig),
+		stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 	}
 }
 
-func (c *Cannelloni) Init(ctx context.Context) error {
-	c.workerPool.Init(ctx, nil)
-
-	return nil
+func (h *Cannelloni) Init(ctx context.Context) error {
+	return h.init(ctx, nil)
 }
 
-func (c *Cannelloni) runWriter(ctx context.Context) {
-	c.writerWg.Add(1)
-	defer c.writerWg.Done()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data := <-c.workerPool.GetOutputCh():
-			if err := c.out.Write(data); err != nil {
-				c.l.Warn("failed to write into output connector", "reason", err)
-			}
-		}
-	}
+func (h *Cannelloni) Run(ctx context.Context) {
+	h.run(ctx)
 }
 
-func (c *Cannelloni) Run(ctx context.Context) {
-	c.l.Info("running")
-
-	received := 0
-	skipped := 0
-	defer func() {
-		c.l.Info("received frames", "count", received)
-		c.l.Info("skipped frames", "count", skipped)
-	}()
-
-	go c.stats.RunStats(ctx)
-
-	go c.workerPool.Run(ctx)
-
-	go c.runWriter(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		default:
-		}
-
-		udpPayload, err := c.in.Read()
-		if err != nil {
-			c.l.Warn("failed to read from input connector", "reason", err)
-			continue
-		}
-
-		c.stats.IncrementItemCount()
-		c.stats.IncrementByteCountBy(udpPayload.DataLen)
-
-		received++
-
-		if !c.workerPool.AddTask(ctx, udpPayload) {
-			skipped++
-		}
-	}
-}
-
-func (c *Cannelloni) Stop() {
-	defer c.l.Info("stopped")
-
-	c.out.Close()
-	c.workerPool.Stop()
-	c.writerWg.Wait()
-}
-
-func (c *Cannelloni) SetInput(connector connector.Connector[*message.UDPPayload]) {
-	c.in = connector
-}
-
-func (c *Cannelloni) SetOutput(connector connector.Connector[*message.RawCANMessageBatch]) {
-	c.out = connector
+func (h *Cannelloni) Stop() {
+	h.close()
 }
 
 type cannelloniFrameMessage struct {
@@ -148,8 +58,6 @@ type cannelloniFrame struct {
 	messageCount   uint16
 	messages       []cannelloniFrameMessage
 }
-
-type cannelloniWorkerPool = worker.Pool[cannelloniWorker, any, *message.UDPPayload, *message.RawCANMessageBatch, *cannelloniWorker]
 
 type cannelloniWorker struct {
 	tel *internal.Telemetry

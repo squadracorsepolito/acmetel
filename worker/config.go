@@ -37,3 +37,11 @@ func (cfg *PoolConfig) toScaler() *scalerCfg {
 		interval:            cfg.AutoScaleInterval,
 	}
 }
+
+func (cfg *PoolConfig) ToPoolConfig() *PoolConfig {
+	return cfg
+}
+
+type ConfigurablePool interface {
+	ToPoolConfig() *PoolConfig
+}

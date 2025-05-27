@@ -2,10 +2,10 @@ package egress
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	qdb "github.com/questdb/go-questdb-client/v3"
-	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
@@ -28,27 +28,14 @@ func NewDefaultQuestDBConfig() *QuestDBConfig {
 }
 
 type QuestDB struct {
-	l *internal.Logger
-
-	cfg *QuestDBConfig
+	*stage[*message.CANSignalBatch, *QuestDBConfig, questDBWorker, *qdb.LineSenderPool, *questDBWorker]
 
 	senderPool *qdb.LineSenderPool
-
-	in connector.Connector[*message.CANSignalBatch]
-
-	workerPool *questDBWorkerPool
 }
 
 func NewQuestDB(cfg *QuestDBConfig) *QuestDB {
-	tel := internal.NewTelemetry("egress", "quest_db")
-	l := tel.Logger()
-
 	return &QuestDB{
-		l: l,
-
-		cfg: cfg,
-
-		workerPool: newQuestDBWorkerPool(tel, cfg.PoolConfig),
+		stage: newStage[*message.CANSignalBatch, *QuestDBConfig, questDBWorker, *qdb.LineSenderPool]("quest_db", cfg),
 	}
 }
 
@@ -56,7 +43,7 @@ func (e *QuestDB) Init(ctx context.Context) error {
 	senderPool, err := qdb.PoolFromOptions(
 		qdb.WithAddress(e.cfg.Address),
 		qdb.WithHttp(),
-		qdb.WithAutoFlushRows(128_000),
+		qdb.WithAutoFlushRows(75_000),
 		qdb.WithRetryTimeout(time.Second),
 	)
 	if err != nil {
@@ -65,58 +52,27 @@ func (e *QuestDB) Init(ctx context.Context) error {
 
 	e.senderPool = senderPool
 
-	if err := e.workerPool.Init(ctx, e.senderPool); err != nil {
-		return err
-	}
-
-	return nil
+	return e.init(ctx, senderPool)
 }
 
 func (e *QuestDB) Run(ctx context.Context) {
-	e.l.Info("running")
-
-	go e.workerPool.Run(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		data, err := e.in.Read()
-		if err != nil {
-			e.l.Warn("failed to read from input connector", "reason", err)
-			continue
-		}
-
-		e.workerPool.AddTask(ctx, data)
-	}
+	e.run(ctx)
 }
 
 func (e *QuestDB) Stop() {
-	defer e.l.Info("stopped")
-
-	e.workerPool.Stop()
+	e.close()
 
 	if err := e.senderPool.Close(context.Background()); err != nil {
-		e.l.Error("failed to close sender pool", err)
+		e.tel.LogError("failed to close sender pool", err)
 	}
 }
 
-func (e *QuestDB) SetInput(connector connector.Connector[*message.CANSignalBatch]) {
-	e.in = connector
-}
-
-type questDBWorkerPool = worker.EgressPool[*message.CANSignalBatch, questDBWorker, *qdb.LineSenderPool, *questDBWorker]
-
-func newQuestDBWorkerPool(tel *internal.Telemetry, cfg *worker.PoolConfig) *questDBWorkerPool {
-	return worker.NewEgressPool[*message.CANSignalBatch, questDBWorker, *qdb.LineSenderPool](tel, cfg)
-}
-
 type questDBWorker struct {
-	tel    *internal.Telemetry
+	tel *internal.Telemetry
+
 	sender qdb.LineSender
+
+	deliveredRows atomic.Int64
 }
 
 func (w *questDBWorker) Init(ctx context.Context, senderPool *qdb.LineSenderPool) error {
@@ -126,6 +82,8 @@ func (w *questDBWorker) Init(ctx context.Context, senderPool *qdb.LineSenderPool
 	}
 
 	w.sender = sender
+
+	w.tel.NewCounter("delivered_rows", func() int64 { return w.deliveredRows.Load() })
 
 	return nil
 }
@@ -184,6 +142,8 @@ func (w *questDBWorker) Deliver(ctx context.Context, data *message.CANSignalBatc
 			return err
 		}
 	}
+
+	w.deliveredRows.Add(int64(data.SignalCount))
 
 	return nil
 }

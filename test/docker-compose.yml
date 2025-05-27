@@ -7,8 +7,9 @@ services:
             - "9000:9000"
             - "9009:9009"
             - "8812:8812"
-        # volumes:
-        #     - ./questdb-data:/root/.questdb
+        volumes:
+            - ./questdb:/var/lib/questdb/conf
+        user: "0"
 
     grafana:
         image: grafana/grafana

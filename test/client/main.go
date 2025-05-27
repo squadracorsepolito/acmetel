@@ -10,6 +10,13 @@ import (
 	"github.com/squadracorsepolito/acmetel/cannelloni"
 )
 
+const (
+	udpPackets = 100_000
+
+	// max 113
+	messagesPerPacket = 50
+)
+
 func main() {
 	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), 20_000))
 
@@ -18,13 +25,11 @@ func main() {
 		panic(err)
 	}
 
-	udpPackets := 100_000
-
 	packets := make([][]byte, 0, udpPackets)
 	for i := range udpPackets {
 		f := cannelloni.NewFrame(0, 0)
 
-		for i := range 113 {
+		for i := range messagesPerPacket {
 			val := uint8(rand.Int32N(255))
 			msg := cannelloni.NewFrameMessage(uint32(i), []byte{val, val, val, val, val, val, val, val})
 			f.AddMessage(msg)
@@ -47,8 +52,8 @@ func main() {
 			panic(err)
 		}
 
-		if i%100 == 0 {
-			time.Sleep(time.Millisecond * 100)
+		if i%10 == 0 {
+			time.Sleep(time.Millisecond * 10)
 		}
 	}
 
