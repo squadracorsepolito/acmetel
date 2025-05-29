@@ -25,6 +25,29 @@ From the current directory (`./test`) do the following steps:
 
 > [!WARNING] > `QuestDB` may give you a warning in the console about the `Max virtual memory areas limit`. If so, you should update your system settings as described in the fallowing [link](https://questdb.com/docs/operations/capacity-planning/#max-virtual-memory-areas-limit).
 
+-   Open your browser and go to `http://localhost:3000` and login into `Grafana` with the credentials `admin/admin`. When you are logged in, go to the `Connections/Data Sources` page (left menu) and add the data sources for `Prometheus` and `QuestDB`.
+
+    -   `Prometheus` data source:
+
+        -   Click `Add Data Source`
+        -   Set `Connection` to `http://localhost:9090`
+        -   Click `Save and Test`
+        -   Go back to the `Connections/Data Sources`
+
+    -   `QuestDB` data source:
+
+        -   Click `Add Data Source`
+        -   Scroll down to the bottom of the page and click on `Find mora data source plugins`
+        -   Search for `questdb` and click on `Install`
+        -   Click `Add new data source` from the plugin page
+        -   Set `Server address` to `questdb` and `Server port` to `8812`
+        -   Set `Credentials Username` to `admin` and `Password` to `quest`
+        -   Set `TLS/SSL Settings` to `disabled`
+        -   Click `Save and Test`
+        -   Go back to the `Home`
+
+        If you are not able to install the `questdb` data source, you can read this guide [here](https://questdb.com/docs/third-party-tools/grafana/).
+
 -   Run the server from the `server` folder:
 
     ```bash
@@ -47,13 +70,13 @@ From the current directory (`./test`) do the following steps:
 
 ### Signals
 
-The signals can be visualized in `Grafana` at `localhost:3000` in the `Signals` dashboard folder. The default credentials for `Grafana` are `admin/admin`. In the `Signals` folder you will find the `Test` dashboard that contains the visualization for 2 of the signals.
+The signals can be visualized in `Grafana` at `localhost:3000` in the `Signals` dashboard. The default credentials for `Grafana` are `admin/admin`.
 
 If you prefer you can use directly the `QuestDB` console at `localhost:9000` to visualize the signals stored in the database.
 
 ### Metrics
 
-The metrics can be visualized in `Grafana` in the `System Metrics` folder and in the `Processing Pipeline` dashboard. Here you can find metrics like the processing time for each packet (message), the number of workers...
+The metrics can be visualized in `Grafana` in the `Acmetel Server` dashboard. Here you can find metrics like the processing time for each packet (message), the number of workers...
 
 ### Traces
 
