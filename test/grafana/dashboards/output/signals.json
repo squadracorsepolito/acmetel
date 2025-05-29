@@ -1,0 +1,318 @@
+{
+   "graphTooltip": 1,
+   "panels": [
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+         },
+         "id": 1,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_0' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 0",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+         },
+         "id": 2,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_1' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 1",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+         },
+         "id": 3,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_2' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 2",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+         },
+         "id": 4,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_3' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 3",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+         },
+         "id": 5,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_4' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 4",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 16
+         },
+         "id": 6,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_5' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 5",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 24
+         },
+         "id": 7,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_6' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 6",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 24
+         },
+         "id": 8,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "datasource",
+                  "uid": "$datasource"
+               },
+               "rawSql": "SELECT timestamp as time,  avg(integer_value) avg_value FROM \"int_signals\" WHERE $__timeFilter(timestamp) AND name = 'message_0_signal_7' SAMPLE BY $__sampleByInterval ALIGN TO CALENDAR"
+            }
+         ],
+         "title": "Signal 7",
+         "type": "timeseries"
+      }
+   ],
+   "refresh": "auto",
+   "schemaVersion": 39,
+   "templating": {
+      "list": [
+         {
+            "name": "datasource",
+            "query": "questdb-questdb-datasource",
+            "type": "datasource"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-15m",
+      "to": "now"
+   },
+   "timezone": "browser",
+   "title": "Signals"
+}

@@ -1,0 +1,378 @@
+{
+   "graphTooltip": 1,
+   "panels": [
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+               },
+               "unit": "Bps"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "id": 1,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "rate(received_bytes_total[$__rate_interval])",
+               "interval": "15s"
+            }
+         ],
+         "title": "Received Bytes Rate",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+               },
+               "unit": "decbytes"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 3,
+            "x": 6,
+            "y": 0
+         },
+         "id": 2,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "received_bytes_total",
+               "interval": "15s"
+            }
+         ],
+         "title": "Received Bytes Total",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 3,
+            "x": 9,
+            "y": 0
+         },
+         "id": 3,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "worker_pool_received_messages_total",
+               "interval": "15s"
+            }
+         ],
+         "title": "Received Messages",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 12,
+            "y": 0
+         },
+         "id": 4,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "worker_pool_handled_messages_total{acmetel_stage_name=\"cannelloni\"}",
+               "interval": "15s",
+               "legendFormat": "{{acmetel_stage_name}}"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "worker_pool_handled_messages_total{acmetel_stage_name=\"can\"}",
+               "interval": "15s",
+               "legendFormat": "{{acmetel_stage_name}}"
+            }
+         ],
+         "title": "Handled Messages",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 3,
+            "x": 18,
+            "y": 0
+         },
+         "id": 5,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "worker_pool_delivered_messages_total",
+               "interval": "15s"
+            }
+         ],
+         "title": "Delivered Messages",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 3,
+            "x": 21,
+            "y": 0
+         },
+         "id": 6,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "received_bytes_total",
+               "interval": "15s"
+            }
+         ],
+         "title": "Inserted Rows",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 50,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2
+               },
+               "unit": "ms"
+            }
+         },
+         "gridPos": {
+            "h": 18,
+            "w": 12,
+            "x": 0,
+            "y": 18
+         },
+         "id": 7,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.95, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "interval": "15s",
+               "legendFormat": "p95"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.9, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "interval": "15s",
+               "legendFormat": "p90"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.75, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "interval": "15s",
+               "legendFormat": "p75"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "histogram_quantile(0.5, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "interval": "15s",
+               "legendFormat": "p50"
+            }
+         ],
+         "title": "Message Processing Time",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "mode": "palette-classic"
+               },
+               "custom": {
+                  "fillOpacity": 0,
+                  "lineInterpolation": "stepAfter",
+                  "lineWidth": 2
+               }
+            }
+         },
+         "gridPos": {
+            "h": 18,
+            "w": 12,
+            "x": 12,
+            "y": 18
+         },
+         "id": 8,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$datasource"
+               },
+               "expr": "worker_pool_active_workers",
+               "interval": "15s",
+               "legendFormat": "{{acmetel_stage_kind}} - {{acmetel_stage_name}}"
+            }
+         ],
+         "title": "Active Workers",
+         "type": "timeseries"
+      }
+   ],
+   "refresh": "auto",
+   "schemaVersion": 39,
+   "templating": {
+      "list": [
+         {
+            "name": "datasource",
+            "query": "prometheus",
+            "type": "datasource"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-15m",
+      "to": "now"
+   },
+   "timezone": "browser",
+   "title": "Acmetel Sever"
+}
