@@ -43,37 +43,37 @@ func main() {
 	defer meterProvider.Shutdown(ctx)
 	otel.SetMeterProvider(meterProvider)
 
-	ingressToAdapter := connector.NewRingBuffer[*message.UDPPayload](16_000)
+	udpToCannelloni := connector.NewRingBuffer[*message.UDPPayload](16_000)
 	cannelloniToCAN := connector.NewRingBuffer[*message.RawCANMessageBatch](16_000)
-	canToEgress := connector.NewRingBuffer[*message.CANSignalBatch](16_000)
+	canToQuestDB := connector.NewRingBuffer[*message.CANSignalBatch](16_000)
 
-	ingressCfg := ingress.NewDefaultUDPConfig()
-	ingress := ingress.NewUDP(ingressCfg)
-	ingress.SetOutput(ingressToAdapter)
+	udpCfg := ingress.NewDefaultUDPConfig()
+	udpIngress := ingress.NewUDP(udpCfg)
+	udpIngress.SetOutput(udpToCannelloni)
 
 	cannelloniCfg := handler.NewDefaultCannelloniConfig()
 	cannelloniHandler := handler.NewCannelloni(cannelloniCfg)
-	cannelloniHandler.SetInput(ingressToAdapter)
+	cannelloniHandler.SetInput(udpToCannelloni)
 	cannelloniHandler.SetOutput(cannelloniToCAN)
 
 	canCfg := handler.NewDefaultCANConfig()
 	canCfg.Messages = getMessages()
 	canHandler := handler.NewCAN(canCfg)
 	canHandler.SetInput(cannelloniToCAN)
-	canHandler.SetOutput(canToEgress)
+	canHandler.SetOutput(canToQuestDB)
 
-	egressCfg := egress.NewDefaultQuestDBConfig()
-	egressCfg.MaxWorkers = 32
-	egressCfg.QueueDepthPerWorker = 1
-	egress := egress.NewQuestDB(egressCfg)
-	egress.SetInput(canToEgress)
+	questDBCfg := egress.NewDefaultQuestDBConfig()
+	questDBCfg.MaxWorkers = 32
+	questDBCfg.QueueDepthPerWorker = 1
+	questDBEgress := egress.NewQuestDB(questDBCfg)
+	questDBEgress.SetInput(canToQuestDB)
 
 	pipeline := acmetel.NewPipeline()
 
-	pipeline.AddStage(ingress)
+	pipeline.AddStage(udpIngress)
 	pipeline.AddStage(cannelloniHandler)
 	pipeline.AddStage(canHandler)
-	pipeline.AddStage(egress)
+	pipeline.AddStage(questDBEgress)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)

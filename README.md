@@ -102,13 +102,13 @@ The `Stage` interface defines the following methods:
 These methods are called during the corresponding phase by the pipeline.
 Currently, there are 4 kinds of stages:
 
-### Ingress
+### Ingress Stage
 
 The Ingress stage is used to receive data from outside of the pipeline. This kind of stage only has an **Output Connector** because it reads data from another source before processing and forwarding it to the next stage through the connector.
 
 #### UDP
 
-The `ingress.UDP` is a stage that receives data from a UDP socket, and writes an `ingress.UDPData` to the output connector. Example:
+The `ingress.UDP` is a stage that receives data from a UDP socket, and writes an `message.UDPPayload` to the output connector. Example:
 
 ```go
 func main() {
@@ -117,13 +117,13 @@ func main() {
     */
 
     // Create a new connector between ingress and stage2
-    ingressToStage2 := connector.NewRingBuffer[*ingress.UDPData](4096)
+    ingressToStage2 := connector.NewRingBuffer[*message.UDPPayload](4096)
 
     // Create the UDP ingress
-    ingressCfg := ingress.NewDefaultUDPConfig()
-    ingress := ingress.NewUDP(ingressCfg)
+    udpCfg := ingress.NewDefaultUDPConfig()
+    udpIngress := ingress.NewUDP(udpCfg)
     // Set the output connector
-	ingress.SetOutput(ingressToStage2)
+	udpIngress.SetOutput(ingressToStage2)
 
     /*
     *   Here you should define the next stages and connectors.
@@ -134,7 +134,7 @@ func main() {
     pipeline := acmetel.NewPipeline()
 
     // Add the stages
-    pipeline.AddStage(ingress)
+    pipeline.AddStage(udpIngress)
     pipeline.AddStage(stage2)
 
     /*
@@ -143,13 +143,13 @@ func main() {
 }
 ```
 
-### Adapter
+### Handler Stage
 
-The adapter is used to convert data between different formats. This kind of stage has an **Input Connector** and an **Output Connector**.
+An handler stage is used to convert/process an input message into an output message. For this reason, an handler stage has an **Input Connector** and an **Output Connector**.
 
 #### Cannelloni
 
-The `adapter.Cannelloni` is a stage that receives an `ingress.UDPData` and converts its bytes payload from [the cannelloni UDP format](https://github.com/mguentner/cannelloni/blob/master/doc/udp_format.md) into an `adapter.CANMessageBatch`. Example:
+The `handler.Cannelloni` is a stage that receives an `message.UDPPayload` and converts its bytes payload from [the cannelloni UDP format](https://github.com/mguentner/cannelloni/blob/master/doc/udp_format.md) into an `message.RawCANMessageBatch`. Example:
 
 ```go
 func main() {
@@ -157,38 +157,34 @@ func main() {
     *   Here you should setup the main context as shown in the pipeline example.
     */
 
-    // Create a new connector between ingress and the adapter
-    ingressToAdapter := connector.NewRingBuffer[*ingress.UDPData](4096)
+    // Create a new connector between previous stage and the cannelloni handler
+    prevToCannelloni := connector.NewRingBuffer[*message.UDPPayload](4096)
+    // Create a new connector between the cannelloni handler and the next stage
+    cannelloniToNext := connector.NewRingBuffer[*message.RawCANMessageBatch](4096)
 
-    // Create a new connector between the adapter and stage3
-    adapterToStage3 := connector.NewRingBuffer[*adapter.CANMessageBatch](4096)
+    /*
+    *   Here you should setup your previous stages.
+    */
 
-    // Create the UDP ingress
-    ingressCfg := ingress.NewDefaultUDPConfig()
-    ingress := ingress.NewUDP(ingressCfg)
-    // Set the output connector for the ingress
-	ingress.SetOutput(ingressToAdapter)
-
-    // Create the cannelloni adapter
-    adapterCfg := adapter.NewDefaultCannelloniConfig()
-    adapter := adapter.NewCannelloni(adapterCfg)
-    // Set the input connector for the adapter
-    adapter.SetInput(ingressToAdapter)
-    // Set the output connector for the adapter
-    adapter.SetOutput(adapterToStage3)
+    // Create the cannelloni handler
+    cannelloniCfg := handler.NewDefaultCannelloniConfig()
+	cannelloniHandler := handler.NewCannelloni(cannelloniCfg)
+    // Set the input connector
+    cannelloniHandler.SetInput(prevToCannelloni)
+    // Set the output connector
+    cannelloniHandler.SetOutput(cannelloniToNext)
 
     /*
     *   Here you should define the next stages and connectors.
-    *   In this case stage3
     */
 
     // Create the pipeline
     pipeline := acmetel.NewPipeline()
 
     // Add the stages
-    pipeline.AddStage(ingress)
-    pipeline.AddStage(adapter)
-    pipeline.AddStage(stage3)
+    pipeline.AddStage(prevStage)
+    pipeline.AddStage(cannelloniHandler)
+    pipeline.AddStage(nextStage)
 
     /*
     *   Here you should run the pipeline as shown in the pipeline example.
@@ -196,13 +192,110 @@ func main() {
 }
 ```
 
-### Processor
+#### CAN
 
-WIP
+The `handler.CAN` is a stage that receives an `message.RawCANMessageBatch` and decodes the signals contained in the messages into an `message.CANSignalBatch`. For the decoding, it uses the [acmelib](https://github.com/squadracorsepolito/acmelib) library. Example:
 
-### Egress
+```go
+func main() {
+    /*
+    *   Here you should setup the main context as shown in the pipeline example.
+    */
 
-TODO
+    // Create a new connector between the previous stage and the CAN handler
+    prevToCAN := connector.NewRingBuffer[*message.RawCANMessageBatch](4096)
+    // Create a new connector between the CAN handler and the next stage
+    canToNext := connector.NewRingBuffer[*message.CANSignalBatch](4096)
+
+    /*
+    *   Here you should setup your previous stages.
+    */
+
+    // Create the CAN handler
+    canCfg := handler.NewDefaultCANConfig()
+    // You need to provide a slice of []*amelib.Message
+	canCfg.Messages = getMessages()
+	canHandler := handler.NewCAN(canCfg)
+	canHandler.SetInput(prevToCAN)
+	canHandler.SetOutput(canToNext)
+
+    /*
+    *   Here you should define the next stages and connectors.
+    */
+
+    // Create the pipeline
+    pipeline := acmetel.NewPipeline()
+
+    // Add the stages
+    pipeline.AddStage(prevStage)
+    pipeline.AddStage(canHandler)
+    pipeline.AddStage(nextStage)
+
+    /*
+    *   Here you should run the pipeline as shown in the pipeline example.
+    */
+}
+
+func getMessages() []*acmelib.Message {
+	messages := []*acmelib.Message{}
+
+	dbcFile, err := os.Open("filename.dbc")
+	if err != nil {
+		panic(err)
+	}
+	defer dbcFile.Close()
+	bus, err := acmelib.ImportDBCFile("bus_name", dbcFile)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, nodeInt := range bus.NodeInterfaces() {
+		for _, msg := range nodeInt.SentMessages() {
+			messages = append(messages, msg)
+		}
+	}
+
+	return messages
+}
+```
+
+### Egress Stage
+
+The egress stage is used to deliver messages to the outside. This kind of stage only has an **Input Connector** because it writes data to another source.
+
+#### QuestDB
+
+The `egress.QuestDB` is a stage that sends data to a QuestDB database. It receives an `message.CANSignalBatch` and inserts it into a QuestDB database. Example:
+
+```go
+func main() {
+    /*
+    *   Here you should setup the main context as shown in the pipeline example.
+    */
+
+    // Create a new connector between the previous stage and the QuestDB egress
+    prevToQuestDB := connector.NewRingBuffer[*message.RawCANMessageBatch](4096)
+
+    /*
+    *   Here you should setup your previous stages.
+    */
+
+    questDBCfg := egress.NewDefaultQuestDBConfig()
+	questDBEgress := egress.NewQuestDB(questDBCfg)
+	questDBEgress.SetInput(prevToQuestDB)
+
+    // Create the pipeline
+    pipeline := acmetel.NewPipeline()
+
+    // Add the stages
+    pipeline.AddStage(prevStage)
+    pipeline.AddStage(questDBEgress)
+
+    /*
+    *   Here you should run the pipeline as shown in the pipeline example.
+    */
+}
+```
 
 ## Connector
 
@@ -253,3 +346,7 @@ func main() {
     */
 }
 ```
+
+## Examples
+
+For a real example server that implements a CAN processing pipeline, check out the `test/server` folder.
