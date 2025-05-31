@@ -47,4 +47,14 @@ local g = import 'g.libsonnet';
       + custom.withLineInterpolation('stepAfter')
       + custom.withFillOpacity(0),
   },
+
+  table: {
+    local t = g.panel.table,
+
+    base(title, targets, w=24, h=8):
+      t.new(title)
+      + t.queryOptions.withTargets(targets)
+      + t.gridPos.withW(w)
+      + t.gridPos.withH(h),
+  },
 }

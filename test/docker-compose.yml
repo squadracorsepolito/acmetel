@@ -19,23 +19,25 @@ services:
         volumes:
             - ./grafana-data:/var/lib/grafana
             - ./grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
+            - ./grafana/datasource.yaml:/etc/grafana/provisioning/datasources/main.yaml
             - ./grafana/dashboards/output:/var/lib/grafana/dashboards
         environment:
             - GF_SECURITY_ADMIN_USER=admin
             - GF_SECURITY_ADMIN_PASSWORD=admin
             - GF_AUTH_ANONYMOUS_ENABLED=false
+            - GF_INSTALL_PLUGINS=questdb-questdb-datasource
         depends_on:
             - questdb
         user: "0"
 
-    jaeger:
-        image: jaegertracing/jaeger
-        container_name: jaeger
-        ports:
-            - "16686:16686"
-            - "4317:4317"
-            - "5778:5778"
-            - "9411:9411"
+    # jaeger:
+    #     image: jaegertracing/jaeger
+    #     container_name: jaeger
+    #     ports:
+    #         - "16686:16686"
+    #         - "4317:4317"
+    #         - "5778:5778"
+    #         - "9411:9411"
 
     otel-collector:
         image: otel/opentelemetry-collector-contrib
@@ -44,10 +46,12 @@ services:
         volumes:
             - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
         ports:
+            - "4317:4317" # OTLP gRPC receiver
             - "4318:4318" # OTLP HTTP receiver
             - "8889:8889" # Prometheus metrics endpoint
         depends_on:
             - prometheus
+            - tempo
 
     prometheus:
         image: prom/prometheus
@@ -63,3 +67,17 @@ services:
             - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
         ports:
             - "9090:9090"
+
+    tempo:
+        image: grafana/tempo
+        container_name: tempo
+        ports:
+            - "3200:3200"
+            # - "14268" # jaeger ingest
+            # - "3200" # tempo
+            # - "4317" # otlp grpc
+            # - "4318" # otlp http
+            # - "9411" # zipkin
+        command: ["-config.file=/etc/tempo.yaml"]
+        volumes:
+            - ./tempo/tempo.yaml:/etc/tempo.yaml

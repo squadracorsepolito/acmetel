@@ -21,3 +21,8 @@ scrape_configs:
       - targets: ['questdb:9003']
     scrape_interval: 5s
     metrics_path: /metrics
+
+  # Scrape metrics from Tempo
+  - job_name: "tempo"
+    static_configs:
+      - targets: ["tempo:3200"]

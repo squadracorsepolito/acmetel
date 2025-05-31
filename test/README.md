@@ -20,33 +20,10 @@ From the current directory (`./test`) do the following steps:
     -   `QuestDB` to store the signals
     -   `Grafana` to visualize the signals and metrics
     -   `Prometheus` to collect metrics
-    -   `Jaeger` to collect and visualize traces
-    -   `OpenTelemetry Collector` to collect open telemetry metrics and forward them to `Prometheus`
+    -   `Tempo` to collect traces
+    -   `OpenTelemetry Collector` to collect open telemetry metrics/traces and forward them to `Prometheus`/`Tempo`
 
 > [!WARNING] > `QuestDB` may give you a warning in the console about the `Max virtual memory areas limit`. If so, you should update your system settings as described in the fallowing [link](https://questdb.com/docs/operations/capacity-planning/#max-virtual-memory-areas-limit).
-
--   Open your browser and go to `http://localhost:3000` and login into `Grafana` with the credentials `admin/admin`. When you are logged in, go to the `Connections/Data Sources` page (left menu) and add the data sources for `Prometheus` and `QuestDB`.
-
-    -   `Prometheus` data source:
-
-        -   Click `Add Data Source`
-        -   Set `Connection` to `http://localhost:9090`
-        -   Click `Save and Test`
-        -   Go back to the `Connections/Data Sources`
-
-    -   `QuestDB` data source:
-
-        -   Click `Add Data Source`
-        -   Scroll down to the bottom of the page and click on `Find mora data source plugins`
-        -   Search for `questdb` and click on `Install`
-        -   Click `Add new data source` from the plugin page
-        -   Set `Server address` to `questdb` and `Server port` to `8812`
-        -   Set `Credentials Username` to `admin` and `Password` to `quest`
-        -   Set `TLS/SSL Settings` to `disabled`
-        -   Click `Save and Test`
-        -   Go back to the `Home`
-
-        If you are not able to install the `questdb` data source, you can read this guide [here](https://questdb.com/docs/third-party-tools/grafana/).
 
 -   Run the server from the `server` folder:
 
@@ -80,4 +57,4 @@ The metrics can be visualized in `Grafana` in the `Acmetel Server` dashboard. He
 
 ### Traces
 
-The traces can be visualized in `Jaeger` at `localhost:16686`. If you want to trace the entire journey of a packet (message) into the pipeline, select `deliver message` from the `Operation` dropdown.
+The traces can be visualized in `Grafana` at the bottom of the `Acmetel Server` dashboard. Here are shown only the traces for packets (messages) that took more than 100ms to process. If you want to trace the entire journey of a packet (message) into the pipeline, click on the link in the first column.

@@ -1,6 +1,7 @@
 local g = import 'g.libsonnet';
 local var = import 'variables.libsonnet';
 local prometheus = g.query.prometheus;
+local tempo = g.query.tempo;
 
 {
   prometheus: {
@@ -20,12 +21,30 @@ local prometheus = g.query.prometheus;
     rate(field):
       self.base('rate(' + field + '[$__rate_interval])'),
 
-    quantile(field, quantile, label):
+    quantile(field, quantile):
       self.base(
-        'histogram_quantile(' + quantile
+        'histogram_quantile(' + std.format('0.%d', quantile)
         + ', sum by(le) (rate(' + field + '_milliseconds_bucket[$__rate_interval])))'
       )
-      + prometheus.withLegendFormat(label),
+      + prometheus.withLegendFormat(std.format('p%d', quantile)),
+  },
+
+  tempo: {
+    local filters = tempo.filters,
+
+    base(service, query=''):
+      local q = if std.isEmpty(query)
+      then std.format('{resource.service.name="%s"}', service)
+      else std.format('{resource.service.name="%s" && %s}', [service, query]);
+
+      tempo.new(
+        '$' + var.datasource.tempo.name, q, []
+      )
+      + tempo.withLimit(20)
+      + tempo.withSpss(10),
+
+    duration(service, duration, operation='>'):
+      self.base(service, std.format('traceDuration%s%s', [operation, duration])),
   },
 
   qdb: {

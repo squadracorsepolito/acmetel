@@ -32,7 +32,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "rate(received_bytes_total[$__rate_interval])",
                "interval": "15s"
@@ -72,7 +72,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "received_bytes_total",
                "interval": "15s"
@@ -112,7 +112,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "worker_pool_received_messages_total",
                "interval": "15s"
@@ -152,7 +152,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "worker_pool_handled_messages_total{acmetel_stage_name=\"cannelloni\"}",
                "interval": "15s",
@@ -161,7 +161,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "worker_pool_handled_messages_total{acmetel_stage_name=\"can\"}",
                "interval": "15s",
@@ -202,7 +202,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "worker_pool_delivered_messages_total",
                "interval": "15s"
@@ -242,7 +242,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "received_bytes_total",
                "interval": "15s"
@@ -281,7 +281,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "histogram_quantile(0.95, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
                "interval": "15s",
@@ -290,16 +290,16 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
-               "expr": "histogram_quantile(0.9, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "expr": "histogram_quantile(0.90, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
                "interval": "15s",
                "legendFormat": "p90"
             },
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "histogram_quantile(0.75, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
                "interval": "15s",
@@ -308,9 +308,9 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
-               "expr": "histogram_quantile(0.5, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
+               "expr": "histogram_quantile(0.50, sum by(le) (rate(total_message_processing_time_milliseconds_bucket[$__rate_interval])))",
                "interval": "15s",
                "legendFormat": "p50"
             }
@@ -347,7 +347,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$datasource"
+                  "uid": "$metrics"
                },
                "expr": "worker_pool_active_workers",
                "interval": "15s",
@@ -356,6 +356,34 @@
          ],
          "title": "Active Workers",
          "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 26
+         },
+         "id": 9,
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "tempo",
+                  "uid": "$traces"
+               },
+               "filters": [ ],
+               "limit": 20,
+               "query": "{resource.service.name=\"sc-test-telemetry\" && traceDuration>100ms}",
+               "spss": 10
+            }
+         ],
+         "title": "Traces",
+         "type": "table"
       }
    ],
    "refresh": "auto",
@@ -363,8 +391,13 @@
    "templating": {
       "list": [
          {
-            "name": "datasource",
+            "name": "metrics",
             "query": "prometheus",
+            "type": "datasource"
+         },
+         {
+            "name": "traces",
+            "query": "tempo",
             "type": "datasource"
          }
       ]
