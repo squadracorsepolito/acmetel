@@ -62,18 +62,24 @@ func main() {
 	canHandler.SetInput(cannelloniToCAN)
 	canHandler.SetOutput(canToQuestDB)
 
-	questDBCfg := egress.NewDefaultQuestDBConfig()
-	questDBCfg.MaxWorkers = 32
-	questDBCfg.QueueDepthPerWorker = 1
-	questDBEgress := egress.NewQuestDB(questDBCfg)
-	questDBEgress.SetInput(canToQuestDB)
+	// questDBCfg := egress.NewDefaultQuestDBConfig()
+	// questDBCfg.MaxWorkers = 32
+	// questDBCfg.QueueDepthPerWorker = 1
+	// questDBEgress := egress.NewQuestDB(questDBCfg)
+	// questDBEgress.SetInput(canToQuestDB)
+
+	redisTSCfg := egress.DefaultRedisTimeSeriesConfig()
+	redisTSgress := egress.NewRedisTimeSeries(redisTSCfg)
+	redisTSgress.SetInput(canToQuestDB)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(udpIngress)
 	pipeline.AddStage(cannelloniHandler)
 	pipeline.AddStage(canHandler)
-	pipeline.AddStage(questDBEgress)
+	// pipeline.AddStage(questDBEgress)
+
+	pipeline.AddStage(redisTSgress)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)

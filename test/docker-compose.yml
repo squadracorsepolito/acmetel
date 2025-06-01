@@ -1,15 +1,21 @@
 services:
-    questdb:
-        image: questdb/questdb
-        container_name: questdb
-        restart: always
+    # questdb:
+    #     image: questdb/questdb
+    #     container_name: questdb
+    #     restart: always
+    #     ports:
+    #         - "9000:9000"
+    #         - "9009:9009"
+    #         - "8812:8812"
+    #     volumes:
+    #         - ./questdb:/var/lib/questdb/conf
+    #     user: "0"
+
+    redis:
+        image: redis
+        container_name: redis
         ports:
-            - "9000:9000"
-            - "9009:9009"
-            - "8812:8812"
-        volumes:
-            - ./questdb:/var/lib/questdb/conf
-        user: "0"
+            - "6379:6379"
 
     grafana:
         image: grafana/grafana
@@ -17,7 +23,6 @@ services:
         ports:
             - "3000:3000"
         volumes:
-            - ./grafana-data:/var/lib/grafana
             - ./grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
             - ./grafana/datasource.yaml:/etc/grafana/provisioning/datasources/main.yaml
             - ./grafana/dashboards/output:/var/lib/grafana/dashboards
@@ -27,17 +32,9 @@ services:
             - GF_AUTH_ANONYMOUS_ENABLED=false
             - GF_INSTALL_PLUGINS=questdb-questdb-datasource
         depends_on:
-            - questdb
+            # - questdb
+            - redis
         user: "0"
-
-    # jaeger:
-    #     image: jaegertracing/jaeger
-    #     container_name: jaeger
-    #     ports:
-    #         - "16686:16686"
-    #         - "4317:4317"
-    #         - "5778:5778"
-    #         - "9411:9411"
 
     otel-collector:
         image: otel/opentelemetry-collector-contrib
