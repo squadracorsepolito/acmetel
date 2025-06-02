@@ -244,7 +244,7 @@
                   "type": "prometheus",
                   "uid": "$metrics"
                },
-               "expr": "received_bytes_total",
+               "expr": "delivered_rows_total",
                "interval": "15s"
             }
          ],
