@@ -1,15 +1,25 @@
 services:
-    questdb:
-        image: questdb/questdb
-        container_name: questdb
-        restart: always
-        ports:
-            - "9000:9000"
-            - "9009:9009"
-            - "8812:8812"
+    # questdb:
+    #     image: questdb/questdb
+    #     container_name: questdb
+    #     restart: always
+    #     ports:
+    #         - "9000:9000"
+    #         - "9009:9009"
+    #         - "8812:8812"
+    #     volumes:
+    #         - ./questdb:/var/lib/questdb/conf
+    #     user: "0"
+
+    valkey:
+        container_name: valkey
+        image: valkey/valkey
         volumes:
-            - ./questdb:/var/lib/questdb/conf
-        user: "0"
+            - ./valkey/valkey.conf:/etc/valkey/valkey.conf
+        #     - valkey-data:/data
+        command: valkey-server /etc/valkey/valkey.conf
+        ports:
+            - 6379:6379
 
     grafana:
         image: grafana/grafana
@@ -26,8 +36,8 @@ services:
             - GF_SECURITY_ADMIN_PASSWORD=admin
             - GF_AUTH_ANONYMOUS_ENABLED=false
             - GF_INSTALL_PLUGINS=questdb-questdb-datasource
-        depends_on:
-            - questdb
+        # depends_on:
+        #     - questdb
         user: "0"
 
     # jaeger:

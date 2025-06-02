@@ -62,18 +62,24 @@ func main() {
 	canHandler.SetInput(cannelloniToCAN)
 	canHandler.SetOutput(canToQuestDB)
 
-	questDBCfg := egress.NewDefaultQuestDBConfig()
-	questDBCfg.MaxWorkers = 32
-	questDBCfg.QueueDepthPerWorker = 1
-	questDBEgress := egress.NewQuestDB(questDBCfg)
-	questDBEgress.SetInput(canToQuestDB)
+	// questDBCfg := egress.NewDefaultQuestDBConfig()
+	// questDBCfg.MaxWorkers = 32
+	// questDBCfg.QueueDepthPerWorker = 1
+	// questDBEgress := egress.NewQuestDB(questDBCfg)
+	// questDBEgress.SetInput(canToQuestDB)
+
+	valkeyCfg := egress.NewDefaultValkeyConfig()
+	valkeyCfg.MaxWorkers = 32
+	valkeyEgress := egress.NewValkey(valkeyCfg)
+	valkeyEgress.SetInput(canToQuestDB)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(udpIngress)
 	pipeline.AddStage(cannelloniHandler)
 	pipeline.AddStage(canHandler)
-	pipeline.AddStage(questDBEgress)
+	// pipeline.AddStage(questDBEgress)
+	pipeline.AddStage(valkeyEgress)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)
