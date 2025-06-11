@@ -36,7 +36,7 @@ g.dashboard.new('Acmetel Sever')
 
       p.stat.base('Delivered Messages', prometheus.counter('worker_pool_delivered_messages_total'), color='blue', w=3),
 
-      p.stat.base('Inserted Rows', prometheus.counter('received_bytes_total'), color='purple', w=3),
+      p.stat.base('Inserted Rows', prometheus.counter('delivered_rows_total'), color='purple', w=3),
 
       p.timeSeries.latency(
         'Message Processing Time',
