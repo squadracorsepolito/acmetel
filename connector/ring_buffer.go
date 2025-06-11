@@ -196,18 +196,11 @@ func (rb *RingBuffer[T]) Write(item T) error {
 			goto cleanup
 		}
 
-		// Buffer is still full, try to mark it as full
-		if !rb.isFull.CompareAndSwap(false, true) {
-			// If the buffer is closed, return
-			if rb.closed.Load() {
-				return ErrClosed
-			}
-
-			continue
-		}
-
 		// Buffer is full, wait for space
 		rb.mux.Lock()
+
+		// Set buffer as full
+		rb.isFull.Store(true)
 
 		// Check if buffer is closed
 		if rb.closed.Load() {
@@ -218,17 +211,21 @@ func (rb *RingBuffer[T]) Write(item T) error {
 		// Wait for space
 		rb.notFull.Wait()
 
-		// Someone signaled the buffer as not full, mark it as not full
-		rb.isFull.Store(false)
+		// Someone signaled the buffer as not full
 		rb.mux.Unlock()
 	}
 
 cleanup:
-	// Check if buffer is empty
+	// Check if buffer is marked as empty
 	if rb.isEmpty.Load() {
-		// Signal buffer as not empty to other goroutines
 		rb.mux.Lock()
-		rb.notEmpty.Signal()
+
+		// Signal buffer as not empty to other goroutines
+		rb.notEmpty.Broadcast()
+
+		// Set buffer as not empty.
+		rb.isEmpty.Store(false)
+
 		rb.mux.Unlock()
 	}
 
@@ -268,18 +265,11 @@ func (rb *RingBuffer[T]) Read() (T, error) {
 			goto cleanup
 		}
 
-		// Buffer is still empty, try to mark it as empty
-		if !rb.isEmpty.CompareAndSwap(false, true) {
-			// If the buffer is closed, return
-			if rb.closed.Load() {
-				return *new(T), ErrClosed
-			}
-
-			continue
-		}
-
 		// Buffer is empty, wait for data
 		rb.mux.Lock()
+
+		// Set buffer as empty
+		rb.isEmpty.Store(true)
 
 		// Check if buffer is closed
 		if rb.closed.Load() {
@@ -290,17 +280,21 @@ func (rb *RingBuffer[T]) Read() (T, error) {
 		// Wait for data
 		rb.notEmpty.Wait()
 
-		// Someone signaled the buffer as not empty, mark it as not empty
-		rb.isEmpty.Store(false)
+		// Someone signaled the buffer as not empty
 		rb.mux.Unlock()
 	}
 
 cleanup:
-	// Check if buffer is full
+	// Check if buffer is marked as full
 	if rb.isFull.Load() {
-		// Signal buffer as not full to other goroutines
 		rb.mux.Lock()
-		rb.notFull.Signal()
+
+		// Signal buffer as not full to other goroutines
+		rb.notFull.Broadcast()
+
+		// Set buffer as not full
+		rb.isFull.Store(false)
+
 		rb.mux.Unlock()
 	}
 
