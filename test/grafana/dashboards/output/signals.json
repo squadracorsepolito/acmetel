@@ -298,7 +298,7 @@
          "type": "timeseries"
       }
    ],
-   "refresh": "auto",
+   "refresh": "1s",
    "schemaVersion": 39,
    "templating": {
       "list": [
@@ -312,6 +312,24 @@
    "time": {
       "from": "now-15m",
       "to": "now"
+   },
+   "timepicker": {
+      "refresh_intervals": [
+         "250ms",
+         "500ms",
+         "1s",
+         "2s",
+         "5s",
+         "10s",
+         "30s",
+         "1m",
+         "5m",
+         "15m",
+         "30m",
+         "1h",
+         "2h",
+         "1d"
+      ]
    },
    "timezone": "browser",
    "title": "Signals"

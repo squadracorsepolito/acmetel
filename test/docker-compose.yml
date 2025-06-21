@@ -26,6 +26,7 @@ services:
             - GF_SECURITY_ADMIN_PASSWORD=admin
             - GF_AUTH_ANONYMOUS_ENABLED=false
             - GF_INSTALL_PLUGINS=questdb-questdb-datasource
+            - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=250ms
         depends_on:
             - questdb
         user: "0"
