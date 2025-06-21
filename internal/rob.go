@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+var (
+	ErrMaxSeqNumExceeded = errors.New("maximum sequence number exceeded")
+	ErrSeqNumOutOfWindow = errors.New("sequence number out of window")
+	ErrSeqNumDuplicated  = errors.New("sequence number duplicated")
+)
+
 type reOrderable interface {
 	SequenceNumber() uint
 	ReceiveTime() time.Time
@@ -20,26 +26,46 @@ type ROB struct {
 	bufItems  uint
 	bufBitmap *bitmap
 
-	deliveredItems uint64
+	enqueuedItems uint64
 
 	nextSeqNum uint
 	maxSeqNum  uint
 
-	// lastReceiveTime is used to detect time anomalies
-	lastReceiveTime time.Time
+	// timeAnomalyLowerBound is the lower bound for time anomaly detection
+	timeAnomalyLowerBound time.Duration
+	// timeAnomalyUpperBound is the upper bound for time anomaly detection
+	timeAnomalyUpperBound time.Duration
 
-	baseSampleTime   time.Time
+	// baseSampleTime holds the base sample time that is used
+	// to calculate the logical time by adding the sample interval
+	baseSampleTime time.Time
+	// sampleInterval holds the current sample interval.
+	// It is basically the estimated time difference between items
+	sampleInterval time.Duration
+	// fallbackInterval is the fallback value for the sample interval
 	fallbackInterval time.Duration
-	sampleInterval   time.Duration
 
-	samples                []time.Duration
-	sampleCount            int
-	maxSamples             int
+	// samples holds the time differences between items (samples)
+	samples []time.Duration
+	// sampleCount is the number of samples currently stored
+	sampleCount int
+	// keptSamples is the number of samples that are kept
+	// when maxSamples is reached
+	keptSamples int
+	// maxSamples is the maximum number of samples that can be stored
+	maxSamples int
+	// sampleEstimateTreshold is the minimum number of samples
+	// that must be present to start estimating the sample interval
+	sampleEstimateTreshold int
+	// isSampleIntervalStable states whether the sample interval is stable
 	isSampleIntervalStable bool
-	lastSeqNum             uint
-	lastSeqTime            time.Time
 
-	lastDeliveredSeqNum uint
+	// lastRecvTime holds the receive time of the last enqueued item.
+	// It is used to calculate the time difference between items
+	lastRecvTime time.Time
+	// lastSeqNum holds the sequence number of the last enqueued item.
+	// It is used to calculate the distance between items
+	lastSeqNum uint
 
 	deliverCh chan<- reOrderable
 }
@@ -59,23 +85,34 @@ func NewROB(windowSize, maxSeqNum uint, deliverCh chan<- reOrderable) *ROB {
 		nextSeqNum: 0,
 		maxSeqNum:  maxSeqNum,
 
+		timeAnomalyLowerBound: time.Millisecond * 500,
+		timeAnomalyUpperBound: time.Second * 5,
+
 		baseSampleTime: time.Now(),
 
-		fallbackInterval: fbInterval,
 		sampleInterval:   fbInterval,
+		fallbackInterval: fbInterval,
 
-		samples:    make([]time.Duration, maxSamples),
-		maxSamples: maxSamples,
+		samples:                make([]time.Duration, maxSamples),
+		sampleCount:            0,
+		keptSamples:            maxSamples / 2,
+		maxSamples:             maxSamples,
+		sampleEstimateTreshold: maxSamples / 2,
 
 		deliverCh: deliverCh,
 	}
 }
 
-var (
-	ErrMaxSeqNumExceeded = errors.New("maximum sequence number exceeded")
-	ErrSeqNumOutOfWindow = errors.New("sequence number out of window")
-	ErrSeqNumDuplicated  = errors.New("sequence number duplicated")
-)
+// getSeqNumDistance returns the distance between the current
+// and the provided sequence number.
+func (rob *ROB) getSeqNumDistance(curr, against uint) uint {
+	if curr >= against {
+		return curr - against
+	}
+
+	// Wraparound case
+	return rob.maxSeqNum + curr + 1 - against
+}
 
 // verifySequenceNumber checks if the sequence number is valid and returns the buffer index.
 func (rob *ROB) verifySequenceNumber(seqNum uint) (uint, error) {
@@ -84,14 +121,7 @@ func (rob *ROB) verifySequenceNumber(seqNum uint) (uint, error) {
 		return 0, ErrMaxSeqNumExceeded
 	}
 
-	// Calculate the distance between the sequence number and the next
-	var distance uint
-	if seqNum >= rob.nextSeqNum {
-		distance = seqNum - rob.nextSeqNum
-	} else {
-		// The sequence number wraps around the max
-		distance = rob.maxSeqNum - rob.nextSeqNum + seqNum + 1
-	}
+	distance := rob.getSeqNumDistance(seqNum, rob.nextSeqNum)
 
 	// Check if the distance is within the window
 	if distance >= rob.windowSize {
@@ -112,6 +142,7 @@ func (rob *ROB) verifySequenceNumber(seqNum uint) (uint, error) {
 func (rob *ROB) Enqueue(item reOrderable) bool {
 	seqNum := item.SequenceNumber()
 
+	// Check if the sequence number is valid
 	bufIdx, err := rob.verifySequenceNumber(seqNum)
 	if err != nil {
 		return false
@@ -119,25 +150,22 @@ func (rob *ROB) Enqueue(item reOrderable) bool {
 
 	recvTime := item.ReceiveTime()
 
-	rob.updateIntervalEstimate(seqNum, recvTime)
-
-	if seqNum == 0 && rob.bufItems == 0 {
+	// If the item is the first, calibrate the base time
+	if rob.enqueuedItems == 0 {
 		rob.calibrateBaseTime(seqNum, recvTime)
 	}
 
-	if rob.deliveredItems == 0 {
-		rob.calibrateBaseTime(seqNum, recvTime)
-	}
-
+	// Check if a time anomaly is detected.
+	// If so, reset the sample interval and calibrate the base time
 	if rob.detectTimeAnomaly(recvTime) {
 		log.Print("Time anomaly detected, recalibrating")
-		rob.resetIntervalEstimate()
+		rob.resetSampleInterval()
 		rob.calibrateBaseTime(seqNum, recvTime)
 	}
 
-	rob.lastReceiveTime = recvTime
-
-	// log.Printf("tring to add item %d, bufIdx %d, nextSeqNum %d", seqNum, bufIdx, rob.nextSeqNum)
+	// Sample the item
+	rob.sampleItem(seqNum, recvTime)
+	rob.enqueuedItems++
 
 	// Check if the item is in sequence
 	if seqNum == rob.nextSeqNum {
@@ -202,13 +230,11 @@ func (rob *ROB) deliver(item reOrderable) {
 	if rob.nextSeqNum > rob.maxSeqNum {
 		rob.nextSeqNum = 0
 	}
-	rob.lastDeliveredSeqNum = seqNum
 
 	rob.deliverCh <- item
-
-	rob.deliveredItems++
 }
 
+// calibrateBaseTime sets the base sample time to the provided receive time.
 func (rob *ROB) calibrateBaseTime(seqNum uint, recvTime time.Time) {
 	rob.baseSampleTime = recvTime
 
@@ -216,84 +242,80 @@ func (rob *ROB) calibrateBaseTime(seqNum uint, recvTime time.Time) {
 		seqNum, recvTime, rob.baseSampleTime)
 }
 
-const maxJitter = 100 * time.Millisecond
-const maxJump = 5 * time.Second
-
+// detectTimeAnomaly returns true if the given receive time is
+// very different from the last receive time.
 func (rob *ROB) detectTimeAnomaly(recvTime time.Time) bool {
-	if rob.lastReceiveTime.IsZero() {
+	if rob.lastRecvTime.IsZero() {
 		return false
 	}
 
-	// Check if receive time goes backwards by more than reasonable network jitter
-	if recvTime.Before(rob.lastReceiveTime.Add(-maxJitter)) {
+	// Check if receive time goes backwards by more than lower bound
+	if recvTime.Before(rob.lastRecvTime.Add(-rob.timeAnomalyLowerBound)) {
 		return true
 	}
 
-	// Check if receive time jumps forward by more than expected
-	if recvTime.After(rob.lastReceiveTime.Add(maxJump)) {
+	// Check if receive time jumps forward by more than upper bound
+	if recvTime.After(rob.lastRecvTime.Add(rob.timeAnomalyUpperBound)) {
 		return true
 	}
 
 	return false
 }
 
-func (rob *ROB) updateIntervalEstimate(seqNum uint, recvTime time.Time) {
-	// Skip if this is the first packet or if sequence numbers are not consecutive
-	if rob.lastSeqTime.IsZero() {
-		rob.lastSeqNum = seqNum
-		rob.lastSeqTime = recvTime
-		return
+// sampleItem adds the current item's time difference to the samples
+// if it is consecutive to the last item.
+func (rob *ROB) sampleItem(seqNum uint, recvTime time.Time) {
+	var sample time.Duration
+
+	// Skip if this is the first item
+	if rob.lastRecvTime.IsZero() {
+		goto update
 	}
 
-	// // Calculate expected sequence difference (handling wraparound)
-	// var seqDiff uint
-	// if seqNum >= rob.lastSeqNum {
-	// 	seqDiff = seqNum - rob.lastSeqNum
-	// } else {
-	// 	// Wraparound case
-	// 	seqDiff = (rob.maxSeqNum + 1 - rob.lastSeqNum) + seqNum
-	// }
-
-	// if seqDiff == 1 {
-	timeDiff := recvTime.Sub(rob.lastSeqTime)
-
-	if timeDiff > 0 && timeDiff < time.Second {
-		rob.addIntervalSample(timeDiff)
+	// Skip if the sequence number is not consecutive
+	if rob.getSeqNumDistance(seqNum, rob.lastSeqNum) != 1 {
+		goto update
 	}
-	// }
 
+	// Calculate the difference between the last and the current receive time
+	sample = recvTime.Sub(rob.lastRecvTime)
+
+	// Reject obviously wrong intervals
+	if sample > 0 && sample < time.Second {
+		rob.addSample(sample)
+	}
+
+update:
 	rob.lastSeqNum = seqNum
-	rob.lastSeqTime = recvTime
+	rob.lastRecvTime = recvTime
 }
 
-func (rob *ROB) addIntervalSample(sample time.Duration) {
+// addSample adds the provided sample and calculates the interval
+// if the number of samples has reached the threshold.
+func (rob *ROB) addSample(sample time.Duration) {
+	// Check if the maximum number of samples has been reached
 	if rob.sampleCount >= rob.maxSamples {
-		halfSamples := rob.maxSamples / 2
-
-		// Shift samples to make room for the current
-		copy(rob.samples, rob.samples[halfSamples:])
-		rob.sampleCount = halfSamples
+		// Shift samples left to make room for the new sample
+		copy(rob.samples, rob.samples[rob.keptSamples:])
+		rob.sampleCount = rob.keptSamples
 	} else {
 		rob.sampleCount++
 	}
 
 	rob.samples[rob.sampleCount-1] = sample
 
-	// Need at least 5 samples to start estimating
-	if rob.sampleCount <= rob.maxSamples/2 {
-		return
+	// Calculate sample interval if the number of samples has reached the threshold
+	if rob.sampleCount > rob.sampleEstimateTreshold {
+		rob.calculateSampleInterval()
 	}
-
-	// Calculate new sample interval
-	rob.calculateSampleInterval()
 }
 
+// calculateSampleInterval calculates the sample interval.
 func (rob *ROB) calculateSampleInterval() {
 	// Calculate sum, min and max
 	min := rob.samples[0]
 	max := min
 	var sum time.Duration
-
 	for i := range rob.sampleCount {
 		sample := rob.samples[i]
 
@@ -306,116 +328,39 @@ func (rob *ROB) calculateSampleInterval() {
 		}
 	}
 
-	// Calculate average
-	avg := sum / time.Duration(rob.sampleCount)
+	// Calculate average duration distance between samples
+	avgDuration := sum / time.Duration(rob.sampleCount)
 
 	// Calculate jitters
 	jitter := max - min
-	maxJitter := avg / 4
+	maxJitter := avgDuration / 4
 
 	// Check if samples are not stable by checking jitter
 	if jitter > maxJitter && rob.isSampleIntervalStable {
 		log.Printf("High jitter detected (%v), reverting to fallback interval %v",
 			jitter, rob.fallbackInterval)
-		rob.resetIntervalEstimate()
+		rob.resetSampleInterval()
 		return
 	}
 
-	// Update sample interval if not stable
+	// Update sample interval if not stable yet
 	if !rob.isSampleIntervalStable {
-		oldInterval := rob.sampleInterval
-		rob.sampleInterval = avg
+		// Set the new sample interval to the average
+		// duration distance between samples
+		rob.sampleInterval = avgDuration
+
 		rob.isSampleIntervalStable = true
 
-		log.Printf("Interval updated: %v -> %v (jitter: %v, samples: %d)",
-			oldInterval, avg, jitter, rob.sampleCount)
+		log.Printf("Interval updated: %v (jitter: %v, samples: %d)",
+			avgDuration, jitter, rob.sampleCount)
 	}
 }
 
-func (rob *ROB) resetIntervalEstimate() {
+// resetSampleInterval resets all the variables related to the sample interval.
+func (rob *ROB) resetSampleInterval() {
 	rob.sampleInterval = rob.fallbackInterval
 	clear(rob.samples)
 	rob.sampleCount = 0
 	rob.isSampleIntervalStable = false
-	rob.lastSeqTime = time.Time{}
-}
-
-//
-//
-//
-
-type bitmap struct {
-	bits []byte
-	num  uint
-}
-
-func newBitmap(num uint) *bitmap {
-	return &bitmap{
-		bits: make([]byte, (num/8)+1),
-		num:  num,
-	}
-}
-
-func (b *bitmap) set(index uint) {
-	b.bits[index/8] |= 1 << (7 - index%8)
-}
-
-func (b *bitmap) isSet(index uint) bool {
-	return b.bits[index/8]&(1<<(7-index%8)) != 0
-}
-
-func (b *bitmap) consume() (consumed uint) {
-	for idx := range b.num {
-		if !b.isSet(idx) {
-			break
-		}
-		consumed++
-	}
-
-	if consumed == 0 {
-		return
-	}
-
-	bitsLen := uint(len(b.bits))
-	skipRows := consumed / 8
-	shiftVal := uint8(consumed % 8)
-	msbMask := uint8(0)
-	for i := range shiftVal {
-		msbMask |= 1 << (7 - i)
-	}
-
-	isFirst := true
-	for byteIdx := skipRows; byteIdx < bitsLen; byteIdx++ {
-		currByte := b.bits[byteIdx]
-
-		if isFirst {
-			isFirst = false
-		} else if shiftVal > 0 {
-			msb := currByte & msbMask
-			lsb := msb >> (8 - shiftVal)
-			b.bits[byteIdx-skipRows-1] |= lsb
-		}
-
-		b.bits[byteIdx-skipRows] = currByte << shiftVal
-	}
-
-	if skipRows > 0 {
-		for byteIdx := bitsLen - skipRows; byteIdx < bitsLen; byteIdx++ {
-			b.bits[byteIdx] = 0
-		}
-	}
-
-	return
-}
-
-func (b bitmap) reset() {
-	for byteIdx := range b.bits {
-		b.bits[byteIdx] = 0
-	}
-}
-
-func (b *bitmap) print() {
-	for byteIdx := range b.bits {
-		log.Printf("%08b ", b.bits[byteIdx])
-	}
+	rob.lastRecvTime = time.Time{}
 }
