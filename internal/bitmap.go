@@ -4,25 +4,25 @@ import "log"
 
 type bitmap struct {
 	bits []byte
-	num  uint
+	num  uint64
 }
 
-func newBitmap(num uint) *bitmap {
+func newBitmap(num uint64) *bitmap {
 	return &bitmap{
 		bits: make([]byte, (num/8)+1),
 		num:  num,
 	}
 }
 
-func (b *bitmap) set(index uint) {
+func (b *bitmap) set(index uint64) {
 	b.bits[index/8] |= 1 << (7 - index%8)
 }
 
-func (b *bitmap) isSet(index uint) bool {
+func (b *bitmap) isSet(index uint64) bool {
 	return b.bits[index/8]&(1<<(7-index%8)) != 0
 }
 
-func (b *bitmap) consume() (consumed uint) {
+func (b *bitmap) consume() (consumed uint64) {
 	for idx := range b.num {
 		if !b.isSet(idx) {
 			break
@@ -34,7 +34,7 @@ func (b *bitmap) consume() (consumed uint) {
 		return
 	}
 
-	bitsLen := uint(len(b.bits))
+	bitsLen := uint64(len(b.bits))
 	skipRows := consumed / 8
 	shiftVal := uint8(consumed % 8)
 	msbMask := uint8(0)
