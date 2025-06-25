@@ -21,10 +21,9 @@ var robCfg = &ROBConfig{
 	SampleEstimateFrequency: 8,
 }
 
-func initROBTest() (*ROB, chan reOrderable) {
-	resultCh := make(chan reOrderable, 256)
+func initROBTest() *ROB[*dummyReOrderable] {
 	tel := NewTelemetry("test", "rob")
-	return NewROB(tel, resultCh, robCfg), resultCh
+	return NewROB[*dummyReOrderable](tel, robCfg)
 }
 
 type dummyReOrderable struct {
@@ -62,7 +61,7 @@ func getItemSequential(baseTime time.Time, maxSeqNum, count, from int) []*dummyR
 func Test_ROB_EnqueueSequential(t *testing.T) {
 	assert := assert.New(t)
 
-	rob, resultCh := initROBTest()
+	rob := initROBTest()
 
 	baseTime := time.Now()
 
@@ -75,9 +74,10 @@ func Test_ROB_EnqueueSequential(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
+		outputCh := rob.GetOutputCh()
 		delivered := 0
 		expected := uint64(0)
-		for item := range resultCh {
+		for item := range outputCh {
 			assert.Equal(expected, item.SequenceNumber())
 
 			logicalTime := baseTime.Add(time.Duration(expected) * time.Millisecond)
@@ -142,15 +142,16 @@ func Test_ROB_EnqueueOutOfOrder(t *testing.T) {
 	}
 	assert.Len(allSeqNum, 256)
 
-	rob, resultCh := initROBTest()
+	rob := initROBTest()
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		count := uint(0)
 
-		for item := range resultCh {
+		outputCh := rob.GetOutputCh()
+		count := uint(0)
+		for item := range outputCh {
 			logicalTime := baseTime.Add(time.Duration(count) * time.Millisecond)
 			assert.Equal(logicalTime, item.LogicalTime())
 
@@ -175,7 +176,7 @@ func Test_ROB_EnqueueOutOfOrder(t *testing.T) {
 func Test_ROB_EnqueueOffset(t *testing.T) {
 	assert := assert.New(t)
 
-	rob, resultCh := initROBTest()
+	rob := initROBTest()
 
 	baseTime := time.Now()
 	itemCount := 256
@@ -188,9 +189,10 @@ func Test_ROB_EnqueueOffset(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
+		outputCh := rob.GetOutputCh()
 		expected := uint64(offset)
 		delivered := 0
-		for item := range resultCh {
+		for item := range outputCh {
 			assert.Equal(expected%256, item.SequenceNumber())
 
 			delivered++
@@ -212,11 +214,30 @@ func Test_ROB_EnqueueOffset(t *testing.T) {
 func Test_ROB_EnqueueErrors(t *testing.T) {
 	assert := assert.New(t)
 
-	rob, _ := initROBTest()
-
-	assert.NoError(rob.Enqueue(nil))
+	rob := initROBTest()
 
 	items := getItemSequential(time.Now(), 255, 128, 0)
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		outputCh := rob.GetOutputCh()
+		delivered := 0
+		expected := uint64(0)
+		for item := range outputCh {
+			assert.Equal(expected%256, item.SequenceNumber())
+
+			delivered++
+			if delivered == 128 {
+				break
+			}
+			expected++
+		}
+	}()
+
 	for _, item := range items {
 		assert.NoError(rob.Enqueue(item))
 	}
@@ -232,12 +253,14 @@ func Test_ROB_EnqueueErrors(t *testing.T) {
 	// Check duplicated sequence number
 	assert.NoError(rob.Enqueue(&dummyReOrderable{seqNum: 159}))
 	assert.ErrorIs(rob.Enqueue(&dummyReOrderable{seqNum: 159}), ErrSeqNumDuplicated)
+
+	wg.Wait()
 }
 
 func Test_ROB_Flush(t *testing.T) {
 	assert := assert.New(t)
 
-	rob, resultCh := initROBTest()
+	rob := initROBTest()
 
 	baseTime := time.Now()
 
@@ -254,9 +277,10 @@ func Test_ROB_Flush(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
+		outputCh := rob.GetOutputCh()
 		delivered := 0
 		expectedSeqNum := uint64(0)
-		for item := range resultCh {
+		for item := range outputCh {
 			assert.Equal(expectedSeqNum, item.SequenceNumber())
 			logicalTime := baseTime.Add(time.Duration(expectedSeqNum) * time.Millisecond)
 			assert.Equal(logicalTime, item.LogicalTime())
@@ -295,6 +319,64 @@ func Test_ROB_Flush(t *testing.T) {
 	assert.Equal(uint64(0), rob.bufItems)
 	assert.Equal(uint64(0), rob.enqueuedItems)
 	assert.Equal(uint64(0), rob.nextSeqNum)
+
+	wg.Wait()
+}
+
+func Test_ROB_FlushTimeout(t *testing.T) {
+	assert := assert.New(t)
+
+	baseTime := time.Now()
+
+	rob := initROBTest()
+
+	offset := 1
+	itemCount := 16
+	items := getItemSequential(baseTime, 255, itemCount, offset)
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		outputCh := rob.GetOutputCh()
+		delivered := 0
+		expected := uint64(offset)
+		for item := range outputCh {
+			assert.Equal(expected%256, item.SequenceNumber())
+
+			delivered++
+			if delivered == itemCount {
+				break
+			}
+
+			expected++
+		}
+	}()
+
+	timeout := time.NewTimer(time.Second)
+
+	enqueueCh := make(chan *dummyReOrderable)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-timeout.C:
+				rob.Flush()
+				return
+			case item := <-enqueueCh:
+				assert.NoError(rob.Enqueue(item))
+			}
+		}
+	}()
+
+	for _, item := range items {
+		enqueueCh <- item
+	}
 
 	wg.Wait()
 }

@@ -12,6 +12,21 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+var cannelloniROBConfig = &internal.ROBConfig{
+	WindowSize: 128,
+	MaxSeqNum:  255,
+
+	TimeAnomalyLowerBound: time.Millisecond * 500,
+	TimeAnomalyUpperBound: time.Second * 5,
+
+	FallbackInterval: time.Millisecond * 1,
+
+	MaxSamples:              512,
+	KeptSamples:             128,
+	SampleEstimateTreshold:  256,
+	SampleEstimateFrequency: 64,
+}
+
 type CannelloniConfig struct {
 	*worker.PoolConfig
 }
@@ -23,12 +38,17 @@ func NewDefaultCannelloniConfig() *CannelloniConfig {
 }
 
 type Cannelloni struct {
-	*stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+	*robStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+
+	// *stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 	return &Cannelloni{
-		stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
+		robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any](
+			"cannelloni", cfg, cannelloniROBConfig),
+
+		// stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 	}
 }
 
@@ -77,6 +97,7 @@ func (w *cannelloniWorker) Handle(ctx context.Context, udpPayload *message.UDPPa
 	}
 
 	msgBatch := message.NewRawCANMessageBatch()
+	msgBatch.SeqNum = f.sequenceNumber
 	msgBatch.Timestamp = time.Now()
 
 	messageCount := len(f.messages)

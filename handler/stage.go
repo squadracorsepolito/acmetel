@@ -93,11 +93,12 @@ func (s *stage[MIn, MOut, Cfg, W, WArgs, WPtr]) runWriter(ctx context.Context) {
 	s.writerWg.Add(1)
 	defer s.writerWg.Done()
 
+	outputCh := s.workerPool.GetOutputCh()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msgOut := <-s.workerPool.GetOutputCh():
+		case msgOut := <-outputCh:
 			if err := s.outputConnector.Write(msgOut); err != nil {
 				s.tel.LogError("failed to write into output connector", err)
 			}

@@ -27,7 +27,7 @@ func main() {
 
 	packets := make([][]byte, 0, udpPackets)
 	for i := range udpPackets {
-		f := cannelloni.NewFrame(0, 0)
+		f := cannelloni.NewFrame(uint8(i%256), 0)
 
 		for i := range messagesPerPacket {
 			val := uint8(rand.Int32N(255))
@@ -35,7 +35,6 @@ func main() {
 			f.AddMessage(msg)
 		}
 
-		f.SequenceNumber = uint8(i % 255)
 		data := f.Encode()
 
 		packets = append(packets, data)

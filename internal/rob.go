@@ -50,11 +50,11 @@ type ROBConfig struct {
 }
 
 // ROB structure implements a re-ordering buffer.
-type ROB struct {
+type ROB[T reOrderable] struct {
 	tel *Telemetry
 
-	// resultCh is the channel that is used to send items after they are re-ordered
-	resultCh chan<- reOrderable
+	// outputCh is the channel that is used to send items after they are re-ordered
+	outputCh chan T
 
 	// windowSize is the size of the re-ordering buffer window
 	windowSize uint64
@@ -65,7 +65,7 @@ type ROB struct {
 	nextSeqNum uint64
 
 	// buf holds the items in the re-ordering buffer
-	buf []reOrderable
+	buf []T
 	// bufItems is the number of items currently stored in the buffer
 	bufItems uint64
 	// bufBitmap is the bitmap that keeps track
@@ -116,18 +116,17 @@ type ROB struct {
 }
 
 // NewROB returns a new [ROB] (re-ordering buffer).
-// It uses the provided channel to send items after they are re-ordered.
-func NewROB(tel *Telemetry, resultCh chan<- reOrderable, cfg *ROBConfig) *ROB {
-	return &ROB{
+func NewROB[T reOrderable](tel *Telemetry, cfg *ROBConfig) *ROB[T] {
+	return &ROB[T]{
 		tel: tel,
 
-		resultCh: resultCh,
+		outputCh: make(chan T, cfg.WindowSize),
 
 		windowSize: cfg.WindowSize,
 		maxSeqNum:  cfg.MaxSeqNum,
 		nextSeqNum: 0,
 
-		buf:       make([]reOrderable, cfg.WindowSize),
+		buf:       make([]T, cfg.WindowSize),
 		bufItems:  0,
 		bufBitmap: newBitmap(cfg.WindowSize),
 
@@ -153,24 +152,28 @@ func NewROB(tel *Telemetry, resultCh chan<- reOrderable, cfg *ROBConfig) *ROB {
 	}
 }
 
+// GetOutputCh returns the output channel of the re-ordering buffer.
+// It is used to receive items after they are re-ordered.
+func (rob *ROB[T]) GetOutputCh() chan T {
+	return rob.outputCh
+}
+
 // Enqueue adds the provided item to the re-ordering buffer.
 // If the sequence number of the item matches the next sequence number,
-// the item is delivered immediately to the result channel.
+// the item is delivered immediately to the output channel.
 // Otherwise, the item is added to the re-ordering buffer.
 // The buffer is flushed automatically when it contains a complete sequence of items.
 // If the buffer sequence is not complete, it must be flushed manually.
 //
 // It return an error if the item's sequence number is invalid.
-func (rob *ROB) Enqueue(item reOrderable) error {
-	if item == nil {
-		return nil
-	}
-
+//
+// ATTENTION: The given item cannot be nil.
+func (rob *ROB[T]) Enqueue(item T) error {
 	seqNum := item.SequenceNumber()
 	recvTime := item.ReceiveTime()
 
-	// Check if the item is the first to be enqueued or just after a flush
-	if rob.enqueuedItems == 0 {
+	// Check if the item is the first of the sequence or just after a flush
+	if rob.enqueuedItems%(rob.maxSeqNum+1) == 0 {
 		// If the sequence number is greater than the window size,
 		// take it as the next sequence number
 		if seqNum >= rob.windowSize {
@@ -230,7 +233,7 @@ func (rob *ROB) Enqueue(item reOrderable) error {
 		// in order to reduce GC pressure
 		copy(rob.buf, rob.buf[itemsToDeliver:])
 		for i := range itemsToDeliver {
-			rob.buf[rob.windowSize-i-1] = nil
+			rob.buf[rob.windowSize-i-1] = *new(T)
 		}
 
 		// Adjust the buffer items count
@@ -250,7 +253,7 @@ func (rob *ROB) Enqueue(item reOrderable) error {
 }
 
 // Flush flushes the re-ordering buffer,
-// so it delivers all the items to the result channel.
+// so it delivers all the items to the output channel.
 // Once called, the buffer is reset.
 // This function is meant to be called when the caller notices
 // that the buffer is not returning items because of a missing item
@@ -258,14 +261,14 @@ func (rob *ROB) Enqueue(item reOrderable) error {
 // Because of the former case, a timeout policy should be implemented,
 // but be careful to the single-threaded nature of the re-ordering buffer
 // (you cannot enqueue items while flushing).
-func (rob *ROB) Flush() {
-	for _, item := range rob.buf {
-		if item == nil {
+func (rob *ROB[T]) Flush() {
+	for idx, item := range rob.buf {
+		if !rob.bufBitmap.isSet(uint64(idx)) {
 			continue
 		}
 
 		rob.setLogicalTime(item)
-		rob.resultCh <- item
+		rob.outputCh <- item
 	}
 
 	rob.resetBuf()
@@ -274,7 +277,7 @@ func (rob *ROB) Flush() {
 
 // getSeqNumDistance returns the distance between the current
 // and the provided sequence number.
-func (rob *ROB) getSeqNumDistance(curr, against uint64) uint64 {
+func (rob *ROB[T]) getSeqNumDistance(curr, against uint64) uint64 {
 	if curr >= against {
 		return curr - against
 	}
@@ -284,7 +287,7 @@ func (rob *ROB) getSeqNumDistance(curr, against uint64) uint64 {
 }
 
 // verifySequenceNumber checks if the sequence number is valid and returns the buffer index.
-func (rob *ROB) verifySequenceNumber(seqNum uint64) (uint64, error) {
+func (rob *ROB[T]) verifySequenceNumber(seqNum uint64) (uint64, error) {
 	// Check if the sequence number exceeds the maximum
 	if seqNum > rob.maxSeqNum {
 		return 0, ErrMaxSeqNumExceeded
@@ -309,7 +312,7 @@ func (rob *ROB) verifySequenceNumber(seqNum uint64) (uint64, error) {
 }
 
 // resetBuf resets all the variables related to the buffer.
-func (rob *ROB) resetBuf() {
+func (rob *ROB[T]) resetBuf() {
 	clear(rob.buf)
 	rob.bufItems = 0
 	rob.enqueuedItems = 0
@@ -318,14 +321,14 @@ func (rob *ROB) resetBuf() {
 }
 
 // setLogicalTime sets the logical time of the provided item.
-func (rob *ROB) setLogicalTime(item reOrderable) {
+func (rob *ROB[T]) setLogicalTime(item T) {
 	seqNum := item.SequenceNumber()
 	logicalTime := rob.baseTime.Add(time.Duration(seqNum) * rob.interval)
 	item.SetLogicalTime(logicalTime)
 }
 
 // deliver delivers the provided item and increments the next sequence number.
-func (rob *ROB) deliver(item reOrderable) {
+func (rob *ROB[T]) deliver(item T) {
 	rob.setLogicalTime(item)
 
 	rob.nextSeqNum++
@@ -333,11 +336,11 @@ func (rob *ROB) deliver(item reOrderable) {
 		rob.nextSeqNum = 0
 	}
 
-	rob.resultCh <- item
+	rob.outputCh <- item
 }
 
 // calibrateBaseTime sets the base sample time to the provided receive time.
-func (rob *ROB) calibrateBaseTime(seqNum uint64, recvTime time.Time) {
+func (rob *ROB[T]) calibrateBaseTime(seqNum uint64, recvTime time.Time) {
 	rob.baseTime = recvTime
 
 	rob.tel.LogInfo("calibrate base time",
@@ -348,7 +351,7 @@ func (rob *ROB) calibrateBaseTime(seqNum uint64, recvTime time.Time) {
 
 // detectTimeAnomaly returns true if the given receive time is
 // very different from the last receive time.
-func (rob *ROB) detectTimeAnomaly(recvTime time.Time) bool {
+func (rob *ROB[T]) detectTimeAnomaly(recvTime time.Time) bool {
 	if rob.lastRecvTime.IsZero() {
 		return false
 	}
@@ -382,7 +385,7 @@ func (rob *ROB) detectTimeAnomaly(recvTime time.Time) bool {
 
 // sampleItem adds the current item's time difference to the samples
 // if it is consecutive to the last item.
-func (rob *ROB) sampleItem(seqNum uint64, recvTime time.Time) {
+func (rob *ROB[T]) sampleItem(seqNum uint64, recvTime time.Time) {
 	var sample time.Duration
 
 	// Skip if this is the first item
@@ -410,7 +413,7 @@ update:
 
 // addSample adds the provided sample and calculates the interval
 // if the number of samples has reached the threshold.
-func (rob *ROB) addSample(sample time.Duration) {
+func (rob *ROB[T]) addSample(sample time.Duration) {
 	// Check if the maximum number of samples has been reached
 	if rob.sampleCount >= rob.maxSamples {
 		// Shift samples left to make room for the new sample
@@ -431,7 +434,7 @@ func (rob *ROB) addSample(sample time.Duration) {
 }
 
 // estimateInterval calculates the interval based on the samples.
-func (rob *ROB) estimateInterval() {
+func (rob *ROB[T]) estimateInterval() {
 	// Calculate sum, min and max
 	min := rob.samples[0]
 	max := min
@@ -458,7 +461,9 @@ func (rob *ROB) estimateInterval() {
 	// Check if samples are not stable by checking jitter
 	if jitter > maxJitter && rob.isIntervalStable {
 		rob.tel.LogInfo("high jitter detected", "jitter", jitter)
-		rob.resetInterval()
+		// rob.resetInterval()
+
+		rob.isIntervalStable = false
 
 		return
 	}
@@ -475,10 +480,12 @@ func (rob *ROB) estimateInterval() {
 }
 
 // resetInterval resets all the variables related to the interval estimation.
-func (rob *ROB) resetInterval() {
-	rob.tel.LogInfo("reset interval", "fallback_interval", rob.fallbackInterval)
+func (rob *ROB[T]) resetInterval() {
+	if rob.interval != rob.fallbackInterval {
+		rob.tel.LogInfo("reset interval", "fallback_interval", rob.fallbackInterval)
+		rob.interval = rob.fallbackInterval
+	}
 
-	rob.interval = rob.fallbackInterval
 	clear(rob.samples)
 	rob.sampleCount = 0
 	rob.isIntervalStable = false

@@ -34,3 +34,10 @@ func (e *embedded) SaveSpan(span trace.Span) {
 func (e *embedded) LoadSpanContext(ctx context.Context) context.Context {
 	return trace.ContextWithSpanContext(ctx, e.span)
 }
+
+type ReOrderableMessage interface {
+	Message
+	SequenceNumber() uint64
+	LogicalTime() time.Time
+	SetLogicalTime(logicalTime time.Time)
+}

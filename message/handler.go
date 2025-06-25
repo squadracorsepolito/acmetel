@@ -16,12 +16,27 @@ type RawCANMessage struct {
 	RawData []byte
 }
 
+var _ ReOrderableMessage = (*RawCANMessageBatch)(nil)
+
 type RawCANMessageBatch struct {
 	embedded
 
+	SeqNum       uint8
 	Timestamp    time.Time
 	MessageCount int
 	Messages     []RawCANMessage
+}
+
+func (msg *RawCANMessageBatch) SequenceNumber() uint64 {
+	return uint64(msg.SeqNum)
+}
+
+func (msg *RawCANMessageBatch) LogicalTime() time.Time {
+	return msg.Timestamp
+}
+
+func (msg *RawCANMessageBatch) SetLogicalTime(logicalTime time.Time) {
+	msg.Timestamp = logicalTime
 }
 
 var rawCANMessageBatchPool = &sync.Pool{
