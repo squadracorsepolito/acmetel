@@ -1,4 +1,4 @@
-package internal
+package rob
 
 type bitmap struct {
 	bits []byte
@@ -20,21 +20,27 @@ func (b *bitmap) isSet(index uint64) bool {
 	return b.bits[index/8]&(1<<(7-index%8)) != 0
 }
 
-func (b *bitmap) consume() (consumed uint64) {
+func (b *bitmap) getConsecutive() uint64 {
+	bits := uint64(0)
+
 	for idx := range b.num {
 		if !b.isSet(idx) {
 			break
 		}
-		consumed++
+		bits++
 	}
 
-	if consumed == 0 {
+	return bits
+}
+
+func (b *bitmap) shiftLeft(amount uint64) {
+	if amount == 0 {
 		return
 	}
 
 	bitsLen := uint64(len(b.bits))
-	skipRows := consumed / 8
-	shiftVal := uint8(consumed % 8)
+	skipRows := amount / 8
+	shiftVal := uint8(amount % 8)
 	msbMask := uint8(0)
 	for i := range shiftVal {
 		msbMask |= 1 << (7 - i)
@@ -60,8 +66,6 @@ func (b *bitmap) consume() (consumed uint64) {
 			b.bits[byteIdx] = 0
 		}
 	}
-
-	return
 }
 
 func (b bitmap) reset() {
