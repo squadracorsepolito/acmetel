@@ -29,11 +29,15 @@ var cannelloniROBConfig = &internal.ROBConfig{
 
 type CannelloniConfig struct {
 	*worker.PoolConfig
+
+	ROBTimeout time.Duration
 }
 
 func NewDefaultCannelloniConfig() *CannelloniConfig {
 	return &CannelloniConfig{
 		PoolConfig: worker.DefaultPoolConfig(),
+
+		ROBTimeout: 50 * time.Millisecond,
 	}
 }
 
@@ -46,7 +50,7 @@ type Cannelloni struct {
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 	return &Cannelloni{
 		robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any](
-			"cannelloni", cfg, cannelloniROBConfig),
+			"cannelloni", cfg, cannelloniROBConfig, cfg.ROBTimeout),
 
 		// stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 	}

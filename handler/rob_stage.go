@@ -15,20 +15,22 @@ import (
 type robStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg worker.ConfigurablePool, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
 	*stage[MIn, MOut, Cfg, W, WArgs, WPtr]
 
-	rob *internal.ROB[MOut]
+	rob        *internal.ROB[MOut]
+	robTimeout time.Duration
 
 	droppedMessages atomic.Int64
 }
 
 func newROBStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg worker.ConfigurablePool, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]](
-	name string, cfg Cfg, robCfg *internal.ROBConfig) *robStage[MIn, MOut, Cfg, W, WArgs, WPtr] {
+	name string, cfg Cfg, robCfg *internal.ROBConfig, robTimeout time.Duration) *robStage[MIn, MOut, Cfg, W, WArgs, WPtr] {
 
 	stage := newStage[MIn, MOut, Cfg, W, WArgs, WPtr](name, cfg)
 
 	return &robStage[MIn, MOut, Cfg, W, WArgs, WPtr]{
 		stage: stage,
 
-		rob: internal.NewROB[MOut](stage.tel, robCfg),
+		rob:        internal.NewROB[MOut](stage.tel, robCfg),
+		robTimeout: robTimeout,
 	}
 }
 
@@ -85,9 +87,7 @@ func (s *robStage[MIn, MOut, Cfg, W, WArgs, WPtr]) run(ctx context.Context) {
 }
 
 func (s *robStage[MIn, MOut, Cfg, W, WArgs, WPtr]) runROB(ctx context.Context) {
-	timeout := time.Millisecond * 500
-
-	flushTimeout := time.NewTimer(timeout)
+	flushTimeout := time.NewTimer(s.robTimeout)
 	defer flushTimeout.Stop()
 
 	poolOutputCh := s.workerPool.GetOutputCh()
@@ -99,10 +99,10 @@ func (s *robStage[MIn, MOut, Cfg, W, WArgs, WPtr]) runROB(ctx context.Context) {
 
 		case <-flushTimeout.C:
 			s.rob.Flush()
-			flushTimeout.Reset(timeout)
+			flushTimeout.Reset(s.robTimeout)
 
 		case msgOut := <-poolOutputCh:
-			flushTimeout.Reset(timeout)
+			flushTimeout.Reset(s.robTimeout)
 
 			if err := s.rob.Enqueue(msgOut); err != nil {
 				s.tel.LogError("message dropped", err, "sequence_number", msgOut.SequenceNumber())
