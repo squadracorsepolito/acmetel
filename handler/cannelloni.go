@@ -42,17 +42,17 @@ func NewDefaultCannelloniConfig() *CannelloniConfig {
 }
 
 type Cannelloni struct {
-	*robStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+	// *robStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 
-	// *stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+	*stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 	return &Cannelloni{
-		robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any](
-			"cannelloni", cfg, cannelloniROBConfig, cfg.ROBTimeout),
+		// robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any](
+		// 	"cannelloni", cfg, cannelloniROBConfig, cfg.ROBTimeout),
 
-		// stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
+		stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 	}
 }
 
