@@ -7,52 +7,58 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/rob"
 	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
 	"go.opentelemetry.io/otel/attribute"
 )
 
-var cannelloniROBConfig = &internal.ROBConfig{
-	WindowSize: 128,
-	MaxSeqNum:  255,
+type ROBConfig struct {
+	*rob.Config
 
-	TimeAnomalyLowerBound: time.Millisecond * 500,
-	TimeAnomalyUpperBound: time.Second * 5,
+	Timeout time.Duration
+}
 
-	FallbackInterval: time.Millisecond * 1,
-
-	MaxSamples:              512,
-	KeptSamples:             128,
-	SampleEstimateTreshold:  256,
-	SampleEstimateFrequency: 64,
+func (cfg *ROBConfig) ToROBConfig() *ROBConfig {
+	return cfg
 }
 
 type CannelloniConfig struct {
 	*worker.PoolConfig
-
-	ROBTimeout time.Duration
+	*ROBConfig
 }
 
 func NewDefaultCannelloniConfig() *CannelloniConfig {
 	return &CannelloniConfig{
 		PoolConfig: worker.DefaultPoolConfig(),
 
-		ROBTimeout: 50 * time.Millisecond,
+		ROBConfig: &ROBConfig{
+			Config: &rob.Config{
+				OutputChannelSize:   256,
+				MaxSeqNum:           255,
+				PrimaryBufferSize:   128,
+				AuxiliaryBufferSize: 128,
+				FlushTreshold:       0.3,
+				BaseAlpha:           0.2,
+				JumpThreshold:       8,
+			},
+
+			Timeout: 50 * time.Millisecond,
+		},
 	}
 }
 
 type Cannelloni struct {
-	// *robStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+	*robStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 
-	*stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
+	// *stage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any, *cannelloniWorker]
 }
 
 func NewCannelloni(cfg *CannelloniConfig) *Cannelloni {
 	return &Cannelloni{
-		// robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any](
-		// 	"cannelloni", cfg, cannelloniROBConfig, cfg.ROBTimeout),
+		robStage: newROBStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 
-		stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
+		// stage: newStage[*message.UDPPayload, *message.RawCANMessageBatch, *CannelloniConfig, cannelloniWorker, any]("cannelloni", cfg),
 	}
 }
 

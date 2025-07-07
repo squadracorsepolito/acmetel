@@ -7,30 +7,41 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/rob"
 	"github.com/squadracorsepolito/acmetel/message"
 	"github.com/squadracorsepolito/acmetel/worker"
 )
 
-type robStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg worker.ConfigurablePool, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
+type configurableROB interface {
+	ToROBConfig() *ROBConfig
+}
+
+type robStageCfg interface {
+	worker.ConfigurablePool
+	configurableROB
+}
+
+type robStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg robStageCfg, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
 	*stage[MIn, MOut, Cfg, W, WArgs, WPtr]
 
-	rob        *internal.ROB[MOut]
+	rob        *rob.ROB[MOut]
 	robTimeout time.Duration
 
 	droppedMessages atomic.Int64
 }
 
-func newROBStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg worker.ConfigurablePool, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]](
-	name string, cfg Cfg, robCfg *internal.ROBConfig, robTimeout time.Duration) *robStage[MIn, MOut, Cfg, W, WArgs, WPtr] {
+func newROBStage[MIn message.Message, MOut message.ReOrderableMessage, Cfg robStageCfg, W, WArgs any, WPtr worker.HandlerWorkerPtr[W, WArgs, MIn, MOut]](
+	name string, cfg Cfg) *robStage[MIn, MOut, Cfg, W, WArgs, WPtr] {
 
 	stage := newStage[MIn, MOut, Cfg, W, WArgs, WPtr](name, cfg)
+
+	robCfg := cfg.ToROBConfig()
 
 	return &robStage[MIn, MOut, Cfg, W, WArgs, WPtr]{
 		stage: stage,
 
-		rob:        internal.NewROB[MOut](stage.tel, robCfg),
-		robTimeout: robTimeout,
+		rob:        rob.NewROB[MOut](robCfg.Config),
+		robTimeout: robCfg.Timeout,
 	}
 }
 
@@ -94,11 +105,11 @@ func (s *robStage[MIn, MOut, Cfg, W, WArgs, WPtr]) runROB(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.rob.Flush()
+			s.rob.FlushAndReset()
 			return
 
 		case <-flushTimeout.C:
-			s.rob.Flush()
+			s.rob.FlushAndReset()
 			flushTimeout.Reset(s.robTimeout)
 
 		case msgOut := <-poolOutputCh:

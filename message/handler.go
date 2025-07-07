@@ -35,8 +35,8 @@ func (msg *RawCANMessageBatch) LogicalTime() time.Time {
 	return msg.Timestamp
 }
 
-func (msg *RawCANMessageBatch) SetLogicalTime(logicalTime time.Time) {
-	msg.Timestamp = logicalTime
+func (msg *RawCANMessageBatch) SetAdjustedTime(adjustedTime time.Time) {
+	msg.Timestamp = adjustedTime
 }
 
 var rawCANMessageBatchPool = &sync.Pool{

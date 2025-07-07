@@ -39,5 +39,5 @@ type ReOrderableMessage interface {
 	Message
 	SequenceNumber() uint64
 	LogicalTime() time.Time
-	SetLogicalTime(logicalTime time.Time)
+	SetAdjustedTime(adjustedTime time.Time)
 }

@@ -5,45 +5,45 @@ type bufferItem interface {
 }
 
 type buffer[T bufferItem] struct {
-	items      []T
-	itemCount  uint64
-	bitmap     *bitmap
-	size       uint64
-	maxSeqNum  uint64
-	nextSeqNum uint64
+	size uint64
+
+	items     []T
+	itemCount uint64
+
+	bitmap *bitmap
+
+	startSeqNum uint64
+	maxSeqNum   uint64
+	nextSeqNum  uint64
 }
 
 func newBuffer[T bufferItem](size, startSeqNum, maxSeqNum uint64) *buffer[T] {
 	return &buffer[T]{
-		items:      make([]T, size),
-		itemCount:  0,
-		bitmap:     newBitmap(size),
-		size:       size,
-		maxSeqNum:  maxSeqNum,
-		nextSeqNum: startSeqNum,
-	}
-}
+		size: size,
 
-func (b *buffer[T]) getSeqNumDistance(curr, against uint64) uint64 {
-	if curr >= against {
-		return curr - against
+		items:     make([]T, size),
+		itemCount: 0,
+
+		bitmap: newBitmap(size),
+
+		startSeqNum: startSeqNum,
+		maxSeqNum:   maxSeqNum,
+		nextSeqNum:  startSeqNum,
 	}
-	return b.maxSeqNum + curr + 1 - against
 }
 
 func (b *buffer[T]) getItemIndex(seqNum uint64) uint64 {
-	return b.getSeqNumDistance(seqNum, b.nextSeqNum) % b.size
+	return getSeqNumDistance(seqNum, b.nextSeqNum, b.maxSeqNum) % b.size
 }
 
-func (b *buffer[T]) inRange(seqNum uint64) bool {
-	if seqNum > b.maxSeqNum {
+func (b *buffer[T]) isValidSize(seqNum uint64) bool {
+	return seqNum <= b.maxSeqNum
+}
+
+func (b *buffer[T]) isInRange(seqNum uint64) bool {
+	if getSeqNumDistance(seqNum, b.nextSeqNum, b.maxSeqNum) >= b.size {
 		return false
 	}
-
-	if b.getSeqNumDistance(seqNum, b.nextSeqNum) >= b.size {
-		return false
-	}
-
 	return true
 }
 
@@ -152,11 +152,24 @@ func (b *buffer[T]) flush() []T {
 		}
 	}
 
-	b.items = make([]T, b.size)
+	clear(b.items)
 	b.itemCount = 0
 	b.bitmap.reset()
 
 	b.incrementNextSeqNum(b.size)
 
 	return items
+}
+
+func (b *buffer[T]) reset() {
+	clear(b.items)
+	b.itemCount = 0
+	b.bitmap.reset()
+
+	b.nextSeqNum = b.startSeqNum
+}
+
+func (b *buffer[T]) setStartSeqNum(seqNum uint64) {
+	b.startSeqNum = seqNum
+	b.nextSeqNum = seqNum
 }

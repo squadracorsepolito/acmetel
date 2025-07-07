@@ -26,48 +26,6 @@ func Test_bitmap(t *testing.T) {
 	assert.True(b.isSet(18))
 	assert.False(b.isSet(19))
 
-	// consumed := b.consume()
-	// assert.Equal(uint64(2), consumed)
-	// assert.Equal(byte(0), b.bits[0])
-	// assert.Equal(byte(0b00000001), b.bits[1])
-	// assert.Equal(byte(0b10000000), b.bits[2])
-
-	// b.bits[0] = 0b11111111
-	// b.bits[1] = 0b10111111
-	// b.bits[2] = 0b10100000
-	// consumed = b.consume()
-	// assert.Equal(uint64(9), consumed)
-	// assert.Equal(byte(0b01111111), b.bits[0])
-	// assert.Equal(byte(0b01000000), b.bits[1])
-	// assert.Equal(byte(0), b.bits[2])
-
-	// b.bits[0] = 0b11111111
-	// b.bits[1] = 0b01010101
-	// b.bits[2] = 0b01010000
-	// consumed = b.consume()
-	// assert.Equal(uint64(8), consumed)
-	// assert.Equal(byte(0b01010101), b.bits[0])
-	// assert.Equal(byte(0b01010000), b.bits[1])
-	// assert.Equal(byte(0), b.bits[2])
-
-	// b.bits[0] = 0b11111111
-	// b.bits[1] = 0b11111111
-	// b.bits[2] = 0b01010000
-	// consumed = b.consume()
-	// assert.Equal(uint64(16), consumed)
-	// assert.Equal(byte(0b01010000), b.bits[0])
-	// assert.Equal(byte(0), b.bits[1])
-	// assert.Equal(byte(0), b.bits[2])
-
-	// b.bits[0] = 0b11111111
-	// b.bits[1] = 0b11111111
-	// b.bits[2] = 0b11010000
-	// consumed = b.consume()
-	// assert.Equal(uint64(18), consumed)
-	// assert.Equal(byte(0b01000000), b.bits[0])
-	// assert.Equal(byte(0), b.bits[1])
-	// assert.Equal(byte(0), b.bits[2])
-
 	b.reset()
 	assert.Equal(byte(0), b.bits[0])
 	assert.Equal(byte(0), b.bits[1])
