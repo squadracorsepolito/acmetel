@@ -29,9 +29,11 @@ func main() {
 	for i := range udpPackets {
 		f := cannelloni.NewFrame(uint8(i%256), 0)
 
-		for i := range messagesPerPacket {
-			val := uint8(rand.Int32N(255))
-			msg := cannelloni.NewFrameMessage(uint32(i), []byte{val, val, val, val, val, val, val, val})
+		for range messagesPerPacket {
+			intVal := uint8(rand.Int32N(255))
+			enumVal := uint8(rand.Int32N(3))
+
+			msg := cannelloni.NewFrameMessage(1, []byte{intVal, intVal, intVal, intVal, intVal, intVal, intVal, enumVal})
 			f.AddMessage(msg)
 		}
 
