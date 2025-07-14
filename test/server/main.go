@@ -83,19 +83,17 @@ func getMessages() []*acmelib.Message {
 	messages := []*acmelib.Message{}
 
 	sigType, _ := acmelib.NewIntegerSignalType("sig_type", 8, false)
-	for i := range 113 {
-		msg := acmelib.NewMessage(fmt.Sprintf("message_%d", i), acmelib.MessageID(i), 8)
+	msg := acmelib.NewMessage("message_0", acmelib.MessageID(1), 8)
 
-		for j := range 8 {
-			sig, _ := acmelib.NewStandardSignal(fmt.Sprintf("message_%d_signal_%d", i, j), sigType)
+	for j := range 8 {
+		sig, _ := acmelib.NewStandardSignal(fmt.Sprintf("message_0_signal_%d", j), sigType)
 
-			if err := msg.InsertSignal(sig, j*8); err != nil {
-				panic(err)
-			}
+		if err := msg.InsertSignal(sig, j*8); err != nil {
+			panic(err)
 		}
-
-		messages = append(messages, msg)
 	}
+
+	messages = append(messages, msg)
 
 	// dbcFile, err := os.Open("MCB.dbc")
 	// if err != nil {
