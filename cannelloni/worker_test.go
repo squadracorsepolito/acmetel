@@ -1,14 +1,24 @@
-package handler
+package cannelloni
 
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/squadracorsepolito/acmetel/internal"
 )
+
+type dummyMsgIn struct {
+	internal.BaseMessage
+}
+
+func (d *dummyMsgIn) GetRawData() []byte {
+	return nil
+}
 
 func Benchmark_cannelloniWorker_decodeFrame(b *testing.B) {
 	b.ReportAllocs()
 
-	adapter := &cannelloniWorker{}
+	adapter := &worker[*dummyMsgIn]{}
 	frame := getCannelloniEncodedFrame()
 
 	b.ResetTimer()

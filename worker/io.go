@@ -1,14 +1,12 @@
 package worker
 
-import (
-	"github.com/squadracorsepolito/acmetel/message"
-)
+import "github.com/squadracorsepolito/acmetel/internal"
 
-type withOutput[T message.Message] struct {
+type withOutput[T internal.Message] struct {
 	ch chan T
 }
 
-func newWithOutput[T message.Message](chSize int) *withOutput[T] {
+func newWithOutput[T internal.Message](chSize int) *withOutput[T] {
 	return &withOutput[T]{
 		ch: make(chan T, chSize),
 	}

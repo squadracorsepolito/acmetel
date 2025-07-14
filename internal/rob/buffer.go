@@ -1,7 +1,7 @@
 package rob
 
 type bufferItem interface {
-	SequenceNumber() uint64
+	GetSequenceNumber() uint64
 }
 
 type buffer[T bufferItem] struct {
@@ -79,7 +79,7 @@ func (b *buffer[T]) insertItem(index uint64, item T) {
 // so it can be skipped (not inserted).
 // If `skip` is not set, the item is always inserted.
 func (b *buffer[T]) enqueue(item T, skip bool) bool {
-	seqNum := item.SequenceNumber()
+	seqNum := item.GetSequenceNumber()
 
 	// If the item is the next and the buffer is empty,
 	// just increment the next sequence number.

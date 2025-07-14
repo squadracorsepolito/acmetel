@@ -96,7 +96,7 @@ func (rob *ROB[T]) tryDequeueFromPrimary() {
 }
 
 func (rob *ROB[T]) enqueuePrimary(item T) error {
-	seqNum := item.SequenceNumber()
+	seqNum := item.GetSequenceNumber()
 
 	// Check if the sequence number is out of the window
 	if !rob.primaryBuf.isInRange(seqNum) {
@@ -140,7 +140,7 @@ func (rob *ROB[T]) enqueuePrimary(item T) error {
 }
 
 func (rob *ROB[T]) enqueueAuxiliary(item T) error {
-	seqNum := item.SequenceNumber()
+	seqNum := item.GetSequenceNumber()
 
 	// Check if the sequence number is out of the window
 	if !rob.auxiliaryBuf.isInRange(seqNum) {
@@ -189,7 +189,7 @@ func (rob *ROB[T]) deliver(item T) {
 //   - [ErrSeqNumDuplicated] if the sequence number is duplicated
 //   - [ErrSeqNumTooBig] if the sequence number is too big
 func (rob *ROB[T]) Enqueue(item T) error {
-	seqNum := item.SequenceNumber()
+	seqNum := item.GetSequenceNumber()
 
 	if !rob.primaryBuf.isValidSize(seqNum) {
 		return ErrSeqNumTooBig

@@ -10,11 +10,11 @@ import (
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel"
+	"github.com/squadracorsepolito/acmetel/can"
+	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/egress"
-	"github.com/squadracorsepolito/acmetel/handler"
-	"github.com/squadracorsepolito/acmetel/ingress"
-	"github.com/squadracorsepolito/acmetel/message"
+	"github.com/squadracorsepolito/acmetel/questdb"
+	"github.com/squadracorsepolito/acmetel/udp"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -43,30 +43,24 @@ func main() {
 	defer meterProvider.Shutdown(ctx)
 	otel.SetMeterProvider(meterProvider)
 
-	udpToCannelloni := connector.NewRingBuffer[*message.UDPPayload](16_000)
-	cannelloniToCAN := connector.NewRingBuffer[*message.RawCANMessageBatch](16_000)
-	canToQuestDB := connector.NewRingBuffer[*message.CANSignalBatch](16_000)
+	udpToCannelloni := connector.NewRingBuffer[*udp.Message](16_000)
+	cannelloniToCAN := connector.NewRingBuffer[*cannelloni.Message](16_000)
+	canToQuestDB := connector.NewRingBuffer[*can.Message](16_000)
 
-	udpCfg := ingress.NewDefaultUDPConfig()
-	udpIngress := ingress.NewUDP(udpCfg)
-	udpIngress.SetOutput(udpToCannelloni)
+	udpCfg := udp.NewDefaultConfig()
+	udpIngress := udp.NewStage(udpToCannelloni, udpCfg)
 
-	cannelloniCfg := handler.NewDefaultCannelloniConfig()
-	cannelloniHandler := handler.NewCannelloni(cannelloniCfg)
-	cannelloniHandler.SetInput(udpToCannelloni)
-	cannelloniHandler.SetOutput(cannelloniToCAN)
+	cannelloniCfg := cannelloni.NewDefaultConfig()
+	cannelloniHandler := cannelloni.NewStage(udpToCannelloni, cannelloniToCAN, cannelloniCfg)
 
-	canCfg := handler.NewDefaultCANConfig()
+	canCfg := can.NewDefaultConfig()
 	canCfg.Messages = getMessages()
-	canHandler := handler.NewCAN(canCfg)
-	canHandler.SetInput(cannelloniToCAN)
-	canHandler.SetOutput(canToQuestDB)
+	canHandler := can.NewStage(cannelloniToCAN, canToQuestDB, canCfg)
 
-	questDBCfg := egress.NewDefaultQuestDBConfig()
+	questDBCfg := questdb.NewDefaultConfig()
 	questDBCfg.MaxWorkers = 32
 	questDBCfg.QueueDepthPerWorker = 1
-	questDBEgress := egress.NewQuestDB(questDBCfg)
-	questDBEgress.SetInput(canToQuestDB)
+	questDBEgress := questdb.NewStage(&questDBHandler{}, canToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()
 

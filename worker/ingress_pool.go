@@ -6,10 +6,9 @@ import (
 	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type IngressPool[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
+type IngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -24,7 +23,7 @@ type IngressPool[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, 
 	receivingErrors  atomic.Int64
 }
 
-func NewIngressPool[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *PoolConfig) *IngressPool[W, InitArgs, Out, WPtr] {
+func NewIngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *PoolConfig) *IngressPool[W, InitArgs, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	return &IngressPool[W, InitArgs, Out, WPtr]{

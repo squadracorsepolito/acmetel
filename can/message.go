@@ -1,9 +1,16 @@
-package message
+package can
 
 import (
-	"sync"
 	"time"
+
+	"github.com/squadracorsepolito/acmetel/internal"
 )
+
+type RawMessage struct {
+	CANID   uint32
+	DataLen int
+	RawData []byte
+}
 
 const (
 	defaultCANSignalCount = 904
@@ -44,31 +51,17 @@ type CANSignal struct {
 	ValueEnum  string
 }
 
-type CANSignalBatch struct {
-	embedded
+type Message struct {
+	internal.BaseMessage
 
 	Timestamp   time.Time
 	SignalCount int
 	Signals     []CANSignal
 }
 
-var canSignalBatchPool = &sync.Pool{
-	New: func() any {
-		return &CANSignalBatch{
-			SignalCount: 0,
-			Signals:     make([]CANSignal, 0, defaultCANSignalCount),
-		}
-	},
-}
-
-func NewCANSignalBatch() *CANSignalBatch {
-	return &CANSignalBatch{
+func newMessage() *Message {
+	return &Message{
 		SignalCount: 0,
 		Signals:     []CANSignal{},
 	}
-	// return canSignalBatchPool.Get().(*CANSignalBatch)
-}
-
-func PutCANSignalBatch(sigBatch *CANSignalBatch) {
-	// canSignalBatchPool.Put(sigBatch)
 }

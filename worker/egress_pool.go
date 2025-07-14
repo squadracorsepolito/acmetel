@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/message"
 	"go.opentelemetry.io/otel/metric"
 )
 
-type EgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
+type EgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
 	tel *internal.Telemetry
 
 	cfg *PoolConfig
@@ -29,7 +28,7 @@ type EgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, Ini
 	messageTotHistogram *internal.Histogram
 }
 
-func NewEgressPool[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
+func NewEgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &EgressPool[In, W, InitArgs, WPtr]{
@@ -116,7 +115,7 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-ep.inputCh:
 			tracedCtx, span := ep.tel.NewTrace(msgIn.LoadSpanContext(ctx), "deliver message")
 
-			receiveTime := msgIn.ReceiveTime()
+			receiveTime := msgIn.GetTimestamp()
 
 			if err := worker.Deliver(tracedCtx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)

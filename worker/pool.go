@@ -6,10 +6,9 @@ import (
 	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/message"
 )
 
-type Pool[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
+type Pool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -28,7 +27,7 @@ type Pool[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, Ini
 	handlingErrors  atomic.Int64
 }
 
-func NewPool[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
+func NewPool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &Pool[W, InitArgs, In, Out, WPtr]{
@@ -114,7 +113,7 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-p.inputCh:
 			tracedCtx, span := p.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle message")
 
-			receiveTime := msgIn.ReceiveTime()
+			receiveTime := msgIn.GetTimestamp()
 
 			msgOut, err := worker.Handle(tracedCtx, msgIn)
 			if err != nil {

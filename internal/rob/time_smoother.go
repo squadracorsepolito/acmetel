@@ -3,8 +3,8 @@ package rob
 import "time"
 
 type timeSmootherItem interface {
-	SequenceNumber() uint64
-	ReceiveTime() time.Time
+	GetSequenceNumber() uint64
+	GetReceiveTime() time.Time
 	SetAdjustedTime(adjustedTime time.Time)
 }
 
@@ -44,8 +44,8 @@ func (ts *timeSmoother[T]) getAlpha(distance uint64) float64 {
 }
 
 func (ts *timeSmoother[T]) adjust(item T) {
-	seqNum := item.SequenceNumber()
-	recvTime := item.ReceiveTime()
+	seqNum := item.GetSequenceNumber()
+	recvTime := item.GetReceiveTime()
 
 	if ts.lastAdjTime.IsZero() {
 		item.SetAdjustedTime(recvTime)

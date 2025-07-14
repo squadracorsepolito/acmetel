@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/squadracorsepolito/acmetel/cannelloni"
+	"github.com/squadracorsepolito/acmetel/test/client/cannelloni"
 )
 
 const (
