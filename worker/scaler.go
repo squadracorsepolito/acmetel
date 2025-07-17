@@ -15,6 +15,7 @@ type scalerCfg struct {
 	maxWorkers          int
 	queueDepthThreshold float64
 	scaleDownFactor     float64
+	scaleDownBackoff    float64
 	interval            time.Duration
 }
 
@@ -22,6 +23,9 @@ type scaler struct {
 	tel *internal.Telemetry
 
 	cfg *scalerCfg
+
+	consecuriveScaleDown int
+	scaleDownAt          float64
 
 	startCh    chan struct{}
 	stopChList []chan struct{}
@@ -37,6 +41,9 @@ func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
 		tel: tel,
 
 		cfg: cfg,
+
+		consecuriveScaleDown: 0,
+		scaleDownAt:          1,
 
 		startCh:    make(chan struct{}, cfg.maxWorkers),
 		stopChList: make([]chan struct{}, 0, cfg.maxWorkers),
@@ -111,11 +118,18 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 			s.scaleWorkers(ctx, int(targetWorkers))
 		}
 
+		s.resetScaleDownTiming()
+
 		return
 	}
 
 	// Scale down if we have more than min workers and there are fewer pending tasks than workers
 	if currWorkers > s.cfg.minWorkers && pendingTasks < currWorkers {
+		// Check if it is the right time to scale down
+		if !s.checkScaleDownTiming() {
+			return
+		}
+
 		// Remove workers
 		workersToRemove := max(int(math.Ceil(float64(currWorkers)*s.cfg.scaleDownFactor)), 1)
 		targetWorkers := max(currWorkers-workersToRemove, s.cfg.minWorkers)
@@ -127,6 +141,30 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 	}
 }
 
+func (s *scaler) resetScaleDownTiming() {
+	s.consecuriveScaleDown = 0
+	s.scaleDownAt = 1
+}
+
+// checkScaleDownTiming states if it is the right time to scale down
+// and updates the necessary parameters
+func (s *scaler) checkScaleDownTiming() bool {
+	s.consecuriveScaleDown++
+
+	// Check if it is the right time to scale down
+	if float64(s.consecuriveScaleDown) < s.scaleDownAt {
+		return false
+	}
+
+	// Exponentially increase the time to scale down so
+	// it gets harder to scale down when multiple consecutive
+	// scales down are triggered (exponential backoff)
+	nextTime := s.scaleDownAt * s.cfg.scaleDownBackoff
+	s.scaleDownAt = min(nextTime, 15)
+
+	return true
+}
+
 func (s *scaler) sendStart(ctx context.Context) {
 	select {
 	case <-ctx.Done():
@@ -135,6 +173,10 @@ func (s *scaler) sendStart(ctx context.Context) {
 }
 
 func (s *scaler) sendStop(ctx context.Context, id int) {
+	if id > s.cfg.maxWorkers {
+		return
+	}
+
 	select {
 	case <-ctx.Done():
 	case s.stopChList[id] <- struct{}{}:

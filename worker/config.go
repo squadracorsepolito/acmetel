@@ -12,6 +12,7 @@ type PoolConfig struct {
 	MaxWorkers          int
 	QueueDepthPerWorker int
 	ScaleDownFactor     float64
+	ScaleDownBackoff    float64
 	AutoScaleInterval   time.Duration
 }
 
@@ -23,6 +24,7 @@ func DefaultPoolConfig() *PoolConfig {
 		MaxWorkers:          runtime.NumCPU(),
 		QueueDepthPerWorker: 128,
 		ScaleDownFactor:     0.1,
+		ScaleDownBackoff:    1.5,
 		AutoScaleInterval:   3 * time.Second,
 	}
 }
@@ -34,6 +36,7 @@ func (cfg *PoolConfig) toScaler() *scalerCfg {
 		minWorkers:          cfg.MinWorkers,
 		queueDepthThreshold: float64(cfg.QueueDepthPerWorker),
 		scaleDownFactor:     cfg.ScaleDownFactor,
+		scaleDownBackoff:    cfg.ScaleDownBackoff,
 		interval:            cfg.AutoScaleInterval,
 	}
 }
