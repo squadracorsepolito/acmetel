@@ -1,9 +1,11 @@
 package udp
 
-import w "github.com/squadracorsepolito/acmetel/worker"
+import (
+	"github.com/squadracorsepolito/acmetel/internal/pool"
+)
 
 type Config struct {
-	*w.PoolConfig
+	PoolConfig *pool.Config
 
 	IPAddr string
 	Port   uint16
@@ -11,7 +13,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		PoolConfig: w.DefaultPoolConfig(),
+		PoolConfig: pool.DefaultConfig(),
 
 		IPAddr: "127.0.0.1",
 		Port:   20_000,

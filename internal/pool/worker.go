@@ -1,4 +1,4 @@
-package worker
+package pool
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 type worker[InitArgs any] interface {
 	Init(ctx context.Context, args InitArgs) error
-	Stop(ctx context.Context) error
+	Close(ctx context.Context) error
 	SetTelemetry(tel *internal.Telemetry)
 }
 

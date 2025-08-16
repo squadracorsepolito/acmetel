@@ -1,4 +1,4 @@
-package worker
+package pool
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-type EgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
+type Egress[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
 	tel *internal.Telemetry
 
-	cfg *PoolConfig
+	cfg *Config
 
 	scaler *scaler
 
@@ -28,10 +28,10 @@ type EgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, In
 	messageTotHistogram *internal.Histogram
 }
 
-func NewEgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *PoolConfig) *EgressPool[In, W, InitArgs, WPtr] {
+func NewEgress[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *Config) *Egress[In, W, InitArgs, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
-	return &EgressPool[In, W, InitArgs, WPtr]{
+	return &Egress[In, W, InitArgs, WPtr]{
 		tel: tel,
 
 		cfg: cfg,
@@ -44,7 +44,7 @@ func NewEgressPool[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W,
 	}
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
+func (ep *Egress[In, W, InitArgs, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
 	ep.initMetrics()
 
 	ep.initArgs = initArgs
@@ -53,19 +53,19 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) Init(ctx context.Context, initArgs 
 	return nil
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) initMetrics() {
+func (ep *Egress[In, W, InitArgs, WPtr]) initMetrics() {
 	ep.tel.NewCounter("worker_pool_delivered_messages", func() int64 { return ep.deliveredMessages.Load() })
 	ep.tel.NewCounter("worker_pool_delivering_errors", func() int64 { return ep.deliveringErrors.Load() })
 
 	ep.messageTotHistogram = ep.tel.NewHistogram("total_message_processing_time", metric.WithUnit("ms"))
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) Run(ctx context.Context) {
+func (ep *Egress[In, W, InitArgs, WPtr]) Run(ctx context.Context) {
 	go ep.runStartWorkerListener(ctx)
 	go ep.scaler.run(ctx)
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) runStartWorkerListener(ctx context.Context) {
+func (ep *Egress[In, W, InitArgs, WPtr]) runStartWorkerListener(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,7 +77,7 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) runStartWorkerListener(ctx context.
 	}
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
+func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
@@ -99,7 +99,7 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 	defer func() {
 		ep.tel.LogInfo("stopping worker", "worker_id", workerID)
 
-		if err := worker.Stop(ctx); err != nil {
+		if err := worker.Close(ctx); err != nil {
 			ep.tel.LogError("failed to stop worker", err, "worker_id", workerID)
 		}
 	}()
@@ -135,7 +135,7 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 	}
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) Stop() {
+func (ep *Egress[In, W, InitArgs, WPtr]) Stop() {
 	ep.tel.LogInfo("stopping worker pool")
 
 	ep.wg.Wait()
@@ -144,7 +144,7 @@ func (ep *EgressPool[In, W, InitArgs, WPtr]) Stop() {
 	close(ep.inputCh)
 }
 
-func (ep *EgressPool[In, W, InitArgs, WPtr]) AddTask(ctx context.Context, task In) bool {
+func (ep *Egress[In, W, InitArgs, WPtr]) AddTask(ctx context.Context, task In) bool {
 	select {
 	case <-ctx.Done():
 		return false

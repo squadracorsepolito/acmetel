@@ -1,4 +1,4 @@
-package worker
+package pool
 
 import (
 	"context"
@@ -8,12 +8,12 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
-type IngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
+type Ingress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
 
-	cfg *PoolConfig
+	cfg *Config
 
 	initArgs InitArgs
 
@@ -23,10 +23,10 @@ type IngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W,
 	receivingErrors  atomic.Int64
 }
 
-func NewIngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *PoolConfig) *IngressPool[W, InitArgs, Out, WPtr] {
+func NewIngress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *Config) *Ingress[W, InitArgs, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
-	return &IngressPool[W, InitArgs, Out, WPtr]{
+	return &Ingress[W, InitArgs, Out, WPtr]{
 		withOutput: newWithOutput[Out](channelSize),
 
 		tel: tel,
@@ -37,23 +37,23 @@ func NewIngressPool[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr
 	}
 }
 
-func (ip *IngressPool[W, InitArgs, Out, WPtr]) Init(_ context.Context, initArgs InitArgs) error {
+func (ip *Ingress[W, InitArgs, Out, WPtr]) Init(_ context.Context, initArgs InitArgs) error {
 	ip.initMetrics()
 
 	ip.initArgs = initArgs
 	return nil
 }
 
-func (ip *IngressPool[W, InitArgs, Out, WPtr]) initMetrics() {
+func (ip *Ingress[W, InitArgs, Out, WPtr]) initMetrics() {
 	ip.tel.NewCounter("worker_pool_received_messages", func() int64 { return ip.receivedMessages.Load() })
 	ip.tel.NewCounter("worker_pool_receiving_errors", func() int64 { return ip.receivingErrors.Load() })
 }
 
-func (ip *IngressPool[W, InitArgs, Out, WPtr]) Run(ctx context.Context) {
+func (ip *Ingress[W, InitArgs, Out, WPtr]) Run(ctx context.Context) {
 	ip.runWorker(ctx)
 }
 
-func (ip *IngressPool[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
+func (ip *Ingress[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
@@ -65,7 +65,7 @@ func (ip *IngressPool[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 	}
 
 	defer func() {
-		if err := worker.Stop(context.Background()); err != nil {
+		if err := worker.Close(context.Background()); err != nil {
 			ip.tel.LogError("failed to stop worker", err)
 		}
 	}()
@@ -103,7 +103,7 @@ func (ip *IngressPool[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 	}
 }
 
-func (ip *IngressPool[W, InitArgs, Out, WPtr]) Stop() {
+func (ip *Ingress[W, InitArgs, Out, WPtr]) Stop() {
 	ip.wg.Wait()
 	ip.closeOutput()
 }

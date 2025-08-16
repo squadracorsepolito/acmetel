@@ -1,4 +1,4 @@
-package worker
+package pool
 
 import (
 	"context"
@@ -8,12 +8,12 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
-type Pool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
+type Handler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
 
-	cfg *PoolConfig
+	cfg *Config
 
 	scaler *scaler
 
@@ -27,10 +27,10 @@ type Pool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, In
 	handlingErrors  atomic.Int64
 }
 
-func NewPool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *PoolConfig) *Pool[W, InitArgs, In, Out, WPtr] {
+func NewHandler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
-	return &Pool[W, InitArgs, In, Out, WPtr]{
+	return &Handler[W, InitArgs, In, Out, WPtr]{
 		withOutput: newWithOutput[Out](channelSize),
 
 		tel: tel,
@@ -45,7 +45,7 @@ func NewPool[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W,
 	}
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
 	p.initMetrics()
 
 	p.initArgs = initArgs
@@ -54,16 +54,16 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs In
 	return nil
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) initMetrics() {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) initMetrics() {
 	p.tel.NewCounter("worker_pool_handled_messages", func() int64 { return p.handledMessages.Load() })
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
 	go p.runStartWorkerListener(ctx)
 	go p.scaler.run(ctx)
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Context) {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,7 +75,7 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Co
 	}
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
@@ -97,7 +97,7 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	defer func() {
 		p.tel.LogInfo("stopping worker", "worker_id", workerID)
 
-		if err := worker.Stop(ctx); err != nil {
+		if err := worker.Close(ctx); err != nil {
 			p.tel.LogError("failed to stop worker", err, "worker_id", workerID)
 		}
 	}()
@@ -139,7 +139,7 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	}
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) Stop() {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) Stop() {
 	p.tel.LogInfo("stopping worker pool")
 
 	p.wg.Wait()
@@ -150,7 +150,7 @@ func (p *Pool[W, InitArgs, In, Out, WPtr]) Stop() {
 	p.closeOutput()
 }
 
-func (p *Pool[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In) bool {
+func (p *Handler[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In) bool {
 	select {
 	case <-ctx.Done():
 		return false

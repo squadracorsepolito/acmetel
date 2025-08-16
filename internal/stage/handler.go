@@ -9,8 +9,8 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/pool"
 	"github.com/squadracorsepolito/acmetel/internal/rob"
-	"github.com/squadracorsepolito/acmetel/worker"
 )
 
 type Handler[MIn, MOut msg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
@@ -22,14 +22,14 @@ type Handler[MIn, MOut msg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, M
 	writerInputCh <-chan MOut
 	writerWg      *sync.WaitGroup
 
-	workerPool *worker.Pool[W, WArgs, MIn, MOut, WPtr]
+	workerPool *pool.Handler[W, WArgs, MIn, MOut, WPtr]
 
 	// Telemetry metrics
 	skippedMessages atomic.Int64
 }
 
 func NewHandler[MIn, MOut msg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]](
-	name string, inputConnector connector.Connector[MIn], outputConnector connector.Connector[MOut], poolCfg *worker.PoolConfig,
+	name string, inputConnector connector.Connector[MIn], outputConnector connector.Connector[MOut], poolCfg *pool.Config,
 ) *Handler[MIn, MOut, W, WArgs, WPtr] {
 
 	tel := internal.NewTelemetry("handler", name)
@@ -42,7 +42,7 @@ func NewHandler[MIn, MOut msg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: worker.NewPool[W, WArgs, MIn, MOut, WPtr](tel, poolCfg),
+		workerPool: pool.NewHandler[W, WArgs, MIn, MOut, WPtr](tel, poolCfg),
 
 		skippedMessages: atomic.Int64{},
 	}
@@ -144,7 +144,7 @@ type HandlerWithROB[MIn msg, MOut reOrderableMsg, W, WArgs any, WPtr handlerWork
 
 func NewHandlerWithROB[MIn msg, MOut reOrderableMsg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]](
 	name string, inputConnector connector.Connector[MIn], outputConnector connector.Connector[MOut],
-	poolCfg *worker.PoolConfig, robCfg *rob.Config, robTimeout time.Duration,
+	poolCfg *pool.Config, robCfg *rob.Config, robTimeout time.Duration,
 ) *HandlerWithROB[MIn, MOut, W, WArgs, WPtr] {
 
 	return &HandlerWithROB[MIn, MOut, W, WArgs, WPtr]{

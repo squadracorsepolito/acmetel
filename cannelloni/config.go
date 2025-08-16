@@ -3,12 +3,12 @@ package cannelloni
 import (
 	"time"
 
+	"github.com/squadracorsepolito/acmetel/internal/pool"
 	"github.com/squadracorsepolito/acmetel/internal/rob"
-	w "github.com/squadracorsepolito/acmetel/worker"
 )
 
 type Config struct {
-	*w.PoolConfig
+	PoolConfig *pool.Config
 
 	ROBConfig  *rob.Config
 	ROBTimeout time.Duration
@@ -16,7 +16,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		PoolConfig: w.DefaultPoolConfig(),
+		PoolConfig: pool.DefaultConfig(),
 
 		ROBConfig: &rob.Config{
 			OutputChannelSize:   256,

@@ -77,6 +77,6 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 	return res, nil
 }
 
-func (w *worker[T]) Stop(_ context.Context) error {
+func (w *worker[T]) Close(_ context.Context) error {
 	return nil
 }

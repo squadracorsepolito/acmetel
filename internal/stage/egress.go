@@ -7,7 +7,7 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/worker"
+	"github.com/squadracorsepolito/acmetel/internal/pool"
 )
 
 type Egress[M msg, W, WA any, WP egressWorkerPtr[W, WA, M]] struct {
@@ -15,13 +15,13 @@ type Egress[M msg, W, WA any, WP egressWorkerPtr[W, WA, M]] struct {
 
 	inputConnector connector.Connector[M]
 
-	workerPool *worker.EgressPool[M, W, WA, WP]
+	workerPool *pool.Egress[M, W, WA, WP]
 
 	// Telemetry metrics
 	skippedMessages atomic.Int64
 }
 
-func NewEgress[M msg, W, WA any, WP egressWorkerPtr[W, WA, M]](name string, inputConnector connector.Connector[M], poolCfg *worker.PoolConfig) *Egress[M, W, WA, WP] {
+func NewEgress[M msg, W, WA any, WP egressWorkerPtr[W, WA, M]](name string, inputConnector connector.Connector[M], poolCfg *pool.Config) *Egress[M, W, WA, WP] {
 	tel := internal.NewTelemetry("egress", name)
 
 	return &Egress[M, W, WA, WP]{
@@ -29,7 +29,7 @@ func NewEgress[M msg, W, WA any, WP egressWorkerPtr[W, WA, M]](name string, inpu
 
 		inputConnector: inputConnector,
 
-		workerPool: worker.NewEgressPool[M, W, WA, WP](tel, poolCfg),
+		workerPool: pool.NewEgress[M, W, WA, WP](tel, poolCfg),
 	}
 }
 

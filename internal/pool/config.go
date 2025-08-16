@@ -1,11 +1,11 @@
-package worker
+package pool
 
 import (
 	"runtime"
 	"time"
 )
 
-type PoolConfig struct {
+type Config struct {
 	AutoScale           bool
 	InitialWorkers      int
 	MinWorkers          int
@@ -16,8 +16,8 @@ type PoolConfig struct {
 	AutoScaleInterval   time.Duration
 }
 
-func DefaultPoolConfig() *PoolConfig {
-	return &PoolConfig{
+func DefaultConfig() *Config {
+	return &Config{
 		AutoScale:           true,
 		InitialWorkers:      1,
 		MinWorkers:          1,
@@ -29,7 +29,7 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
-func (cfg *PoolConfig) toScaler() *scalerCfg {
+func (cfg *Config) toScaler() *scalerCfg {
 	return &scalerCfg{
 		enabled:             cfg.AutoScale,
 		maxWorkers:          cfg.MaxWorkers,
@@ -41,10 +41,10 @@ func (cfg *PoolConfig) toScaler() *scalerCfg {
 	}
 }
 
-func (cfg *PoolConfig) ToPoolConfig() *PoolConfig {
+func (cfg *Config) ToPoolConfig() *Config {
 	return cfg
 }
 
 type ConfigurablePool interface {
-	ToPoolConfig() *PoolConfig
+	ToPoolConfig() *Config
 }

@@ -1,4 +1,4 @@
-package questdb
+package raw
 
 import (
 	"github.com/squadracorsepolito/acmetel/internal/pool"
@@ -6,14 +6,10 @@ import (
 
 type Config struct {
 	PoolConfig *pool.Config
-
-	Address string
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		PoolConfig: pool.DefaultConfig(),
-
-		Address: "localhost:9000",
 	}
 }

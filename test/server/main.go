@@ -58,8 +58,8 @@ func main() {
 	canHandler := can.NewStage(cannelloniToCAN, canToQuestDB, canCfg)
 
 	questDBCfg := questdb.NewDefaultConfig()
-	questDBCfg.MaxWorkers = 32
-	questDBCfg.QueueDepthPerWorker = 1
+	questDBCfg.PoolConfig.MaxWorkers = 32
+	questDBCfg.PoolConfig.QueueDepthPerWorker = 1
 	questDBEgress := questdb.NewStage(&questDBHandler{}, canToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()

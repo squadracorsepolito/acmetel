@@ -105,7 +105,7 @@ func (w *worker[T]) Deliver(ctx context.Context, msg T) error {
 	return nil
 }
 
-func (w *worker[T]) Stop(ctx context.Context) error {
+func (w *worker[T]) Close(ctx context.Context) error {
 	// Close the sender
 	select {
 	case <-ctx.Done():

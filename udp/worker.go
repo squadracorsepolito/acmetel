@@ -92,6 +92,6 @@ func (w *worker) Receive(ctx context.Context) (*Message, bool, error) {
 	return res, false, nil
 }
 
-func (w *worker) Stop(_ context.Context) error {
+func (w *worker) Close(_ context.Context) error {
 	return nil
 }

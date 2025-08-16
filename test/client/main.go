@@ -18,7 +18,7 @@ const (
 )
 
 func main() {
-	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), 20_000))
+	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), 20000))
 
 	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {

@@ -1,4 +1,4 @@
-package worker
+package pool
 
 import "github.com/squadracorsepolito/acmetel/internal"
 

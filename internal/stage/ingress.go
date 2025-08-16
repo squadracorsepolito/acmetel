@@ -6,7 +6,7 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/worker"
+	"github.com/squadracorsepolito/acmetel/internal/pool"
 )
 
 type Ingress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]] struct {
@@ -16,11 +16,11 @@ type Ingress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]] struct {
 
 	writerWg *sync.WaitGroup
 
-	workerPool *worker.IngressPool[W, WArgs, M, WPtr]
+	workerPool *pool.Ingress[W, WArgs, M, WPtr]
 }
 
 func NewIngress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]](
-	name string, outputConnector connector.Connector[M], poolCfg *worker.PoolConfig,
+	name string, outputConnector connector.Connector[M], poolCfg *pool.Config,
 ) *Ingress[M, W, WArgs, WPtr] {
 
 	tel := internal.NewTelemetry("ingress", name)
@@ -32,7 +32,7 @@ func NewIngress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]](
 
 		writerWg: &sync.WaitGroup{},
 
-		workerPool: worker.NewIngressPool[W, WArgs, M, WPtr](tel, poolCfg),
+		workerPool: pool.NewIngress[W, WArgs, M, WPtr](tel, poolCfg),
 	}
 }
 
