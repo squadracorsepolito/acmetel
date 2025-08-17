@@ -75,6 +75,6 @@ func (i *Ingress[M, W, WArgs, WPtr]) Close() {
 	i.tel.LogInfo("closing")
 
 	i.outputConnector.Close()
-	i.workerPool.Stop()
+	i.workerPool.Close()
 	i.writerWg.Wait()
 }

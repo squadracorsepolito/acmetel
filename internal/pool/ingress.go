@@ -8,6 +8,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
+// Ingress is a worker pool intended to be used by an ingress stage.
 type Ingress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
 	*withOutput[Out]
 
@@ -23,6 +24,7 @@ type Ingress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, Ini
 	receivingErrors  atomic.Int64
 }
 
+// NewIngress returns a new ingress worker pool.
 func NewIngress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *Config) *Ingress[W, InitArgs, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
@@ -37,6 +39,7 @@ func NewIngress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, 
 	}
 }
 
+// Init initialises the worker pool.
 func (ip *Ingress[W, InitArgs, Out, WPtr]) Init(_ context.Context, initArgs InitArgs) error {
 	ip.initMetrics()
 
@@ -49,6 +52,7 @@ func (ip *Ingress[W, InitArgs, Out, WPtr]) initMetrics() {
 	ip.tel.NewCounter("worker_pool_receiving_errors", func() int64 { return ip.receivingErrors.Load() })
 }
 
+// Run runs the worker pool.
 func (ip *Ingress[W, InitArgs, Out, WPtr]) Run(ctx context.Context) {
 	ip.runWorker(ctx)
 }
@@ -103,7 +107,10 @@ func (ip *Ingress[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 	}
 }
 
-func (ip *Ingress[W, InitArgs, Out, WPtr]) Stop() {
+// Close closes the worker pool.
+func (ip *Ingress[W, InitArgs, Out, WPtr]) Close() {
+	ip.tel.LogInfo("closing worker pool")
+
 	ip.wg.Wait()
 	ip.closeOutput()
 }

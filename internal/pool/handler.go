@@ -8,6 +8,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
+// Handler is a worker pool intended to be used by an handler stage.
 type Handler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
@@ -27,6 +28,7 @@ type Handler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W,
 	handlingErrors  atomic.Int64
 }
 
+// NewHandler returns a new handler worker pool.
 func NewHandler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
@@ -45,6 +47,7 @@ func NewHandler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr
 	}
 }
 
+// Init initialises the worker pool.
 func (p *Handler[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
 	p.initMetrics()
 
@@ -58,6 +61,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) initMetrics() {
 	p.tel.NewCounter("worker_pool_handled_messages", func() int64 { return p.handledMessages.Load() })
 }
 
+// Run runs the worker pool.
 func (p *Handler[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
 	go p.runStartWorkerListener(ctx)
 	go p.scaler.run(ctx)
@@ -139,8 +143,9 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	}
 }
 
-func (p *Handler[W, InitArgs, In, Out, WPtr]) Stop() {
-	p.tel.LogInfo("stopping worker pool")
+// Close closes the worker pool.
+func (p *Handler[W, InitArgs, In, Out, WPtr]) Close() {
+	p.tel.LogInfo("closing worker pool")
 
 	p.wg.Wait()
 	p.scaler.stop()
@@ -150,6 +155,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) Stop() {
 	p.closeOutput()
 }
 
+// AddTask adds a new task to the worker pool.
 func (p *Handler[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In) bool {
 	select {
 	case <-ctx.Done():

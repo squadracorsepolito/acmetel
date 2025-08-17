@@ -12,6 +12,9 @@ func newWithOutput[T internal.Message](chSize int) *withOutput[T] {
 	}
 }
 
+// GetOutputCh returns the output channel of the worker pool.
+// The output channel is used by the worker pool
+// to send processed messages.
 func (wo *withOutput[T]) GetOutputCh() <-chan T {
 	return wo.ch
 }

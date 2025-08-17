@@ -123,7 +123,7 @@ func (s *Handler[MIn, MOut, W, WArgs, WPtr]) Close() {
 
 	// Close the output connector
 	s.outputConnector.Close()
-	s.workerPool.Stop()
+	s.workerPool.Close()
 
 	// Wait for the writer to finish
 	s.writerWg.Wait()

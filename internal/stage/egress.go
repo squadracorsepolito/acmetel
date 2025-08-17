@@ -84,5 +84,5 @@ func (e *Egress[M, W, WA, WP]) Run(ctx context.Context) {
 func (e *Egress[M, W, WA, WP]) Close() {
 	e.Tel.LogInfo("closing")
 
-	e.workerPool.Stop()
+	e.workerPool.Close()
 }
