@@ -1,8 +1,6 @@
 package can
 
 import (
-	"time"
-
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
@@ -12,39 +10,22 @@ type RawMessage struct {
 	RawData []byte
 }
 
+type ValueType int
+
 const (
-	defaultCANSignalCount = 904
+	ValueTypeFlag ValueType = iota
+	ValueTypeInt
+	ValueTypeFloat
+	ValueTypeEnum
 )
 
 type CANSignalTable int
 
-const (
-	CANSignalTableFlag CANSignalTable = iota
-	CANSignalTableInt
-	CANSignalTableFloat
-	CANSignalTableEnum
-)
-
-func (c CANSignalTable) String() string {
-	switch c {
-	case CANSignalTableFlag:
-		return "flag_signals"
-	case CANSignalTableInt:
-		return "int_signals"
-	case CANSignalTableFloat:
-		return "float_signals"
-	case CANSignalTableEnum:
-		return "enum_signals"
-	default:
-		return "unknown"
-	}
-}
-
 type CANSignal struct {
 	CANID      int64
 	Name       string
-	RawValue   int64
-	Table      CANSignalTable
+	RawValue   uint64
+	Type       ValueType
 	ValueFlag  bool
 	ValueInt   int64
 	ValueFloat float64
@@ -54,7 +35,6 @@ type CANSignal struct {
 type Message struct {
 	internal.BaseMessage
 
-	Timestamp   time.Time
 	SignalCount int
 	Signals     []CANSignal
 }

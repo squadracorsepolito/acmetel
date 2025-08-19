@@ -23,7 +23,3 @@ func NewStage[T internal.RawDataMessage](inputConnector connector.Connector[T], 
 func (s *Stage[T]) Init(ctx context.Context) error {
 	return s.HandlerWithROB.Init(ctx, nil)
 }
-
-func (s *Stage[T]) Stop() {
-	s.HandlerWithROB.Close()
-}

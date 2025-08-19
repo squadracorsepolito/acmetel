@@ -6,39 +6,26 @@ import (
 
 	qdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
-type Stage[T internal.Message] struct {
-	*stage.Egress[T, worker[T], *workerArgs[T], *worker[T]]
+type Stage struct {
+	*stage.Egress[*Message, worker, *workerArgs, *worker]
 
 	cfg *Config
 
-	handler    Handler[T]
 	senderPool *qdb.LineSenderPool
 }
 
-func NewStage[T internal.Message](handler Handler[T], inputConnector connector.Connector[T], cfg *Config) *Stage[T] {
-	if handler == nil {
-		panic("handler is nil")
-	}
-
-	return &Stage[T]{
-		Egress: stage.NewEgress[T, worker[T], *workerArgs[T]]("questdb", inputConnector, cfg.PoolConfig),
+func NewStage(inputConnector connector.Connector[*Message], cfg *Config) *Stage {
+	return &Stage{
+		Egress: stage.NewEgress[*Message, worker, *workerArgs]("questdb", inputConnector, cfg.PoolConfig),
 
 		cfg: cfg,
-
-		handler: handler,
 	}
 }
 
-func (s *Stage[T]) Init(ctx context.Context) error {
-	// Initialize the handler
-	if err := s.handler.Init(ctx); err != nil {
-		return err
-	}
-
+func (s *Stage) Init(ctx context.Context) error {
 	// Create the sender pool
 	senderPool, err := qdb.PoolFromOptions(
 		qdb.WithAddress(s.cfg.Address),
@@ -51,20 +38,14 @@ func (s *Stage[T]) Init(ctx context.Context) error {
 	}
 	s.senderPool = senderPool
 
-	return s.Egress.Init(ctx, &workerArgs[T]{
-		handler:    s.handler,
-		senderPool: senderPool,
-	})
+	return s.Egress.Init(ctx, newWorkerArgs(senderPool))
 }
 
-func (s *Stage[T]) Stop() {
+func (s *Stage) Close() {
 	s.Egress.Close()
 
 	// Close the sender pool
 	if err := s.senderPool.Close(context.Background()); err != nil {
 		s.Tel.LogError("failed to close sender pool", err)
 	}
-
-	// Close the handler
-	s.handler.Close()
 }

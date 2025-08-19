@@ -41,7 +41,3 @@ func (s *Stage) Init(ctx context.Context) error {
 
 	return s.Ingress.Init(ctx, &workerArgs{conn: conn})
 }
-
-func (s *Stage) Stop() {
-	s.Ingress.Close()
-}

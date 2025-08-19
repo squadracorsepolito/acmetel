@@ -117,7 +117,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-p.inputCh:
 			tracedCtx, span := p.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle message")
 
-			receiveTime := msgIn.GetTimestamp()
+			receiveTime := msgIn.GetReceiveTime()
 
 			msgOut, err := worker.Handle(tracedCtx, msgIn)
 			if err != nil {

@@ -32,7 +32,7 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 	defer span.End()
 
 	res := newMessage()
-	res.Timestamp = msgIn.GetTimestamp()
+	res.SetTimestamp(msgIn.GetTimestamp())
 
 	for _, msg := range msgIn.GetRawCANMessages() {
 		canID := msg.CANID
@@ -42,28 +42,28 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 			sig := CANSignal{
 				CANID:    int64(canID),
 				Name:     dec.Signal.Name(),
-				RawValue: int64(dec.RawValue),
+				RawValue: dec.RawValue,
 			}
 
 			switch dec.ValueType {
 			case acmelib.SignalValueTypeFlag:
-				sig.Table = CANSignalTableFlag
+				sig.Type = ValueTypeFlag
 				sig.ValueFlag = dec.ValueAsFlag()
 
 			case acmelib.SignalValueTypeInt:
-				sig.Table = CANSignalTableInt
+				sig.Type = ValueTypeInt
 				sig.ValueInt = dec.ValueAsInt()
 
 			case acmelib.SignalValueTypeUint:
-				sig.Table = CANSignalTableInt
+				sig.Type = ValueTypeInt
 				sig.ValueInt = int64(dec.ValueAsUint())
 
 			case acmelib.SignalValueTypeFloat:
-				sig.Table = CANSignalTableFloat
+				sig.Type = ValueTypeFloat
 				sig.ValueFloat = dec.ValueAsFloat()
 
 			case acmelib.SignalValueTypeEnum:
-				sig.Table = CANSignalTableEnum
+				sig.Type = ValueTypeEnum
 				sig.ValueEnum = dec.ValueAsEnum()
 			}
 

@@ -1,8 +1,6 @@
 package cannelloni
 
 import (
-	"time"
-
 	"github.com/squadracorsepolito/acmetel/can"
 	"github.com/squadracorsepolito/acmetel/internal"
 )
@@ -36,21 +34,12 @@ type Message struct {
 	internal.BaseMessage
 
 	SeqNum       uint8
-	Timestamp    time.Time
 	MessageCount int
 	Messages     []can.RawMessage
 }
 
 func (msg *Message) GetSequenceNumber() uint64 {
 	return uint64(msg.SeqNum)
-}
-
-func (msg *Message) LogicalTime() time.Time {
-	return msg.Timestamp
-}
-
-func (msg *Message) SetAdjustedTime(adjustedTime time.Time) {
-	msg.Timestamp = adjustedTime
 }
 
 func (msg *Message) GetRawCANMessages() []can.RawMessage {

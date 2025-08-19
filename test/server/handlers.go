@@ -7,42 +7,67 @@ import (
 	"github.com/squadracorsepolito/acmetel/questdb"
 )
 
-type questDBHandler struct{}
+type rawHandler struct{}
 
-func (h *questDBHandler) Init(_ context.Context) error {
+func newRawHandler() *rawHandler {
+	return &rawHandler{}
+}
+
+func (h *rawHandler) Init(_ context.Context) error {
 	return nil
 }
 
-func (h *questDBHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Result, error) {
+func (h *rawHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Message, error) {
+	nextMsg := questdb.NewMessage()
+	nextMsg.Timestamp = msg.GetTimestamp()
+
 	rows := make([]*questdb.Row, 0, msg.SignalCount)
 
 	for _, sig := range msg.Signals {
-		table := sig.Table
+		valType := sig.Type
 
-		row := questdb.NewRow(table.String())
+		row := questdb.NewRow(h.getTable(valType))
 
-		row.AddColumn(questdb.NewSymbolColumn("name", sig.Name))
+		row.AddSymbol(questdb.NewSymbol("name", sig.Name))
+
 		row.AddColumn(questdb.NewIntColumn("can_id", sig.CANID))
-		row.AddColumn(questdb.NewIntColumn("raw_value", sig.RawValue))
+		row.AddColumn(questdb.NewIntColumn("raw_value", int64(sig.RawValue)))
 
-		switch table {
-		case can.CANSignalTableFlag:
+		switch valType {
+		case can.ValueTypeFlag:
 			row.AddColumn(questdb.NewBoolColumn("flag_value", sig.ValueFlag))
 
-		case can.CANSignalTableInt:
+		case can.ValueTypeInt:
 			row.AddColumn(questdb.NewIntColumn("integer_value", sig.ValueInt))
 
-		case can.CANSignalTableFloat:
+		case can.ValueTypeFloat:
 			row.AddColumn(questdb.NewFloatColumn("float_value", sig.ValueFloat))
 
-		case can.CANSignalTableEnum:
-			row.AddColumn(questdb.NewSymbolColumn("enum_value", sig.ValueEnum))
+		case can.ValueTypeEnum:
+			row.AddSymbol(questdb.NewSymbol("enum_value", sig.ValueEnum))
 		}
 
 		rows = append(rows, row)
 	}
 
-	return questdb.NewResult(rows...), nil
+	nextMsg.AddRows(rows...)
+
+	return nextMsg, nil
 }
 
-func (h *questDBHandler) Close() {}
+func (h *rawHandler) Close() {}
+
+func (h *rawHandler) getTable(valType can.ValueType) string {
+	switch valType {
+	case can.ValueTypeFlag:
+		return "flag_signals"
+	case can.ValueTypeInt:
+		return "int_signals"
+	case can.ValueTypeFloat:
+		return "float_signals"
+	case can.ValueTypeEnum:
+		return "enum_signals"
+	default:
+		return "unknown_signals"
+	}
+}

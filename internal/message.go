@@ -10,6 +10,7 @@ import (
 type Message interface {
 	SetReceiveTime(receiveTime time.Time)
 	GetReceiveTime() time.Time
+	SetTimestamp(timestamp time.Time)
 	GetTimestamp() time.Time
 	SaveSpan(span trace.Span)
 	LoadSpanContext(ctx context.Context) context.Context
@@ -19,21 +20,31 @@ type ReOrderableMessage interface {
 	Message
 
 	GetSequenceNumber() uint64
-	LogicalTime() time.Time
-	SetAdjustedTime(adjustedTime time.Time)
 }
 
 type BaseMessage struct {
 	receiveTime time.Time
+	timestamp   time.Time
 	span        trace.SpanContext
+}
+
+func NewBaseMessage(receiveTime time.Time, span trace.SpanContext) *BaseMessage {
+	return &BaseMessage{
+		receiveTime: receiveTime,
+		span:        span,
+	}
 }
 
 func (bm *BaseMessage) SetReceiveTime(receiveTime time.Time) {
 	bm.receiveTime = receiveTime
 }
 
+func (bm *BaseMessage) SetTimestamp(timestamp time.Time) {
+	bm.timestamp = timestamp
+}
+
 func (bm *BaseMessage) GetTimestamp() time.Time {
-	return bm.receiveTime
+	return bm.timestamp
 }
 
 func (bm *BaseMessage) GetReceiveTime() time.Time {

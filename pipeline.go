@@ -10,7 +10,7 @@ import (
 type Stage interface {
 	Init(ctx context.Context) error
 	Run(ctx context.Context)
-	Stop()
+	Close()
 }
 
 type Connector[T any] = connector.Connector[T]
@@ -62,9 +62,9 @@ func (p *Pipeline) Run(ctx context.Context) {
 	}
 }
 
-func (p *Pipeline) Stop() {
+func (p *Pipeline) Close() {
 	for _, stage := range p.stages {
-		stage.Stop()
+		stage.Close()
 	}
 
 	p.wg.Wait()

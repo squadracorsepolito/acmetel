@@ -36,7 +36,3 @@ func (s *Stage[T]) Init(ctx context.Context) error {
 
 	return s.Handler.Init(ctx, &workerArgs{decoder: decoder})
 }
-
-func (s *Stage[T]) Stop() {
-	s.Handler.Close()
-}

@@ -119,7 +119,7 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 		case msgIn := <-ep.inputCh:
 			tracedCtx, span := ep.tel.NewTrace(msgIn.LoadSpanContext(ctx), "deliver message")
 
-			receiveTime := msgIn.GetTimestamp()
+			receiveTime := msgIn.GetReceiveTime()
 
 			if err := worker.Deliver(tracedCtx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)

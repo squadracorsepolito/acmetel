@@ -5,7 +5,7 @@ import "time"
 type timeSmootherItem interface {
 	GetSequenceNumber() uint64
 	GetReceiveTime() time.Time
-	SetAdjustedTime(adjustedTime time.Time)
+	SetTimestamp(adjustedTime time.Time)
 }
 
 type timeSmoother[T timeSmootherItem] struct {
@@ -48,7 +48,7 @@ func (ts *timeSmoother[T]) adjust(item T) {
 	recvTime := item.GetReceiveTime()
 
 	if ts.lastAdjTime.IsZero() {
-		item.SetAdjustedTime(recvTime)
+		item.SetTimestamp(recvTime)
 
 		ts.lastAdjTime = recvTime
 		ts.lastSeqNum = seqNum
@@ -70,7 +70,7 @@ func (ts *timeSmoother[T]) adjust(item T) {
 		adjTime = ts.lastAdjTime
 	}
 
-	item.SetAdjustedTime(adjTime)
+	item.SetTimestamp(adjTime)
 
 	ts.lastAdjTime = adjTime
 	ts.lastSeqNum = seqNum

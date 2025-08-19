@@ -14,6 +14,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/questdb"
+	"github.com/squadracorsepolito/acmetel/raw"
 	"github.com/squadracorsepolito/acmetel/udp"
 
 	"go.opentelemetry.io/otel"
@@ -25,6 +26,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
+
+const connectorSize = 4096
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -43,38 +46,43 @@ func main() {
 	defer meterProvider.Shutdown(ctx)
 	otel.SetMeterProvider(meterProvider)
 
-	udpToCannelloni := connector.NewRingBuffer[*udp.Message](16_000)
-	cannelloniToCAN := connector.NewRingBuffer[*cannelloni.Message](16_000)
-	canToQuestDB := connector.NewRingBuffer[*can.Message](16_000)
+	udpToCannelloni := connector.NewRingBuffer[*udp.Message](connectorSize)
+	cannelloniToCAN := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
+	canToRaw := connector.NewRingBuffer[*can.Message](connectorSize)
+	rawToQuestDB := connector.NewRingBuffer[*questdb.Message](connectorSize)
 
 	udpCfg := udp.NewDefaultConfig()
-	udpIngress := udp.NewStage(udpToCannelloni, udpCfg)
+	udpStage := udp.NewStage(udpToCannelloni, udpCfg)
 
 	cannelloniCfg := cannelloni.NewDefaultConfig()
-	cannelloniHandler := cannelloni.NewStage(udpToCannelloni, cannelloniToCAN, cannelloniCfg)
+	cannelloniStage := cannelloni.NewStage(udpToCannelloni, cannelloniToCAN, cannelloniCfg)
 
 	canCfg := can.NewDefaultConfig()
 	canCfg.Messages = getMessages()
-	canHandler := can.NewStage(cannelloniToCAN, canToQuestDB, canCfg)
+	canStage := can.NewStage(cannelloniToCAN, canToRaw, canCfg)
+
+	rawCfg := raw.NewDefaultConfig()
+	rawStage := raw.NewStage("can_to_questdb", newRawHandler(), canToRaw, rawToQuestDB, rawCfg)
 
 	questDBCfg := questdb.NewDefaultConfig()
 	questDBCfg.PoolConfig.MaxWorkers = 32
 	questDBCfg.PoolConfig.QueueDepthPerWorker = 1
-	questDBEgress := questdb.NewStage(&questDBHandler{}, canToQuestDB, questDBCfg)
+	questDBStage := questdb.NewStage(rawToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()
 
-	pipeline.AddStage(udpIngress)
-	pipeline.AddStage(cannelloniHandler)
-	pipeline.AddStage(canHandler)
-	pipeline.AddStage(questDBEgress)
+	pipeline.AddStage(udpStage)
+	pipeline.AddStage(cannelloniStage)
+	pipeline.AddStage(canStage)
+	pipeline.AddStage(rawStage)
+	pipeline.AddStage(questDBStage)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)
 	}
 
 	go pipeline.Run(ctx)
-	defer pipeline.Stop()
+	defer pipeline.Close()
 
 	<-ctx.Done()
 }

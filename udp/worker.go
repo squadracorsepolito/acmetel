@@ -82,7 +82,10 @@ func (w *worker) Receive(ctx context.Context) (*Message, bool, error) {
 	copy(data, w.buf)
 
 	res := newMessage(data, dataLen)
-	res.SetReceiveTime(time.Now())
+
+	recvTime := time.Now()
+	res.SetReceiveTime(recvTime)
+	res.SetTimestamp(recvTime)
 
 	span.SetAttributes(attribute.Int("data_len", dataLen))
 	res.SaveSpan(span)
