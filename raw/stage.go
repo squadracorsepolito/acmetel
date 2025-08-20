@@ -4,17 +4,17 @@ import (
 	"context"
 
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
-type Stage[In, Out internal.Message] struct {
+type Stage[In, Out message.Message] struct {
 	*stage.Handler[In, Out, worker[In, Out], *workerArgs[In, Out], *worker[In, Out]]
 
 	workerHandler Handler[In, Out]
 }
 
-func NewStage[In, Out internal.Message](name string, handler Handler[In, Out], inputConnector connector.Connector[In], outputConnector connector.Connector[Out], cfg *Config) *Stage[In, Out] {
+func NewStage[In, Out message.Message](name string, handler Handler[In, Out], inputConnector connector.Connector[In], outputConnector connector.Connector[Out], cfg *Config) *Stage[In, Out] {
 	if handler == nil {
 		panic("handler is nil")
 	}

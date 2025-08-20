@@ -19,7 +19,7 @@ func (h *rawHandler) Init(_ context.Context) error {
 
 func (h *rawHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Message, error) {
 	nextMsg := questdb.NewMessage()
-	nextMsg.Timestamp = msg.GetTimestamp()
+	nextMsg.SetTimestamp(msg.GetTimestamp())
 
 	rows := make([]*questdb.Row, 0, msg.SignalCount)
 
@@ -30,23 +30,26 @@ func (h *rawHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Messa
 
 		row.AddSymbol(questdb.NewSymbol("name", sig.Name))
 
-		row.AddColumn(questdb.NewIntColumn("can_id", sig.CANID))
-		row.AddColumn(questdb.NewIntColumn("raw_value", int64(sig.RawValue)))
+		columns := make([]questdb.Column, 0, 3)
+
+		columns = append(columns, questdb.NewIntColumn("can_id", int64(sig.CANID)))
+		columns = append(columns, questdb.NewIntColumn("raw_value", int64(sig.RawValue)))
 
 		switch valType {
 		case can.ValueTypeFlag:
-			row.AddColumn(questdb.NewBoolColumn("flag_value", sig.ValueFlag))
+			columns = append(columns, questdb.NewBoolColumn("flag_value", sig.ValueFlag))
 
 		case can.ValueTypeInt:
-			row.AddColumn(questdb.NewIntColumn("integer_value", sig.ValueInt))
+			columns = append(columns, questdb.NewIntColumn("integer_value", sig.ValueInt))
 
 		case can.ValueTypeFloat:
-			row.AddColumn(questdb.NewFloatColumn("float_value", sig.ValueFloat))
+			columns = append(columns, questdb.NewFloatColumn("float_value", sig.ValueFloat))
 
 		case can.ValueTypeEnum:
 			row.AddSymbol(questdb.NewSymbol("enum_value", sig.ValueEnum))
 		}
 
+		row.AddColumns(columns...)
 		rows = append(rows, row)
 	}
 

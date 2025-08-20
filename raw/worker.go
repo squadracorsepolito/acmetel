@@ -4,17 +4,18 @@ import (
 	"context"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
-type workerArgs[In, Out internal.Message] struct {
+type workerArgs[In, Out message.Message] struct {
 	handler Handler[In, Out]
 }
 
-func newWorkerArgs[In, Out internal.Message](handler Handler[In, Out]) *workerArgs[In, Out] {
+func newWorkerArgs[In, Out message.Message](handler Handler[In, Out]) *workerArgs[In, Out] {
 	return &workerArgs[In, Out]{handler: handler}
 }
 
-type worker[In, Out internal.Message] struct {
+type worker[In, Out message.Message] struct {
 	tel *internal.Telemetry
 
 	handler Handler[In, Out]

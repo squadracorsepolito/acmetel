@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 	"go.opentelemetry.io/otel/metric"
 )
 
 // Egress is a worker pool intended to be used by an egress stage.
-type Egress[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
+type Egress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]] struct {
 	tel *internal.Telemetry
 
 	cfg *Config
@@ -30,7 +31,7 @@ type Egress[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitAr
 }
 
 // NewEgress returns a new egress worker pool.
-func NewEgress[In internal.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *Config) *Egress[In, W, InitArgs, WPtr] {
+func NewEgress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *Config) *Egress[In, W, InitArgs, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &Egress[In, W, InitArgs, WPtr]{

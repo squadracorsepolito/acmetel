@@ -2,48 +2,27 @@ package cannelloni
 
 import (
 	"github.com/squadracorsepolito/acmetel/can"
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
-var _ internal.ReOrderableMessage = (*Message)(nil)
+var _ message.ReOrderable = (*Message)(nil)
+var _ can.RawCANMessageCarrier = (*Message)(nil)
 
 const (
 	// maximum number of CAN 2.0 messages (8 bytes payload) that can be sent in a single udp/ipv4/ethernet packet
 	defaultCANMessageNum = 113
 )
 
-type RawCANMessage struct {
-	CANID   uint32
-	DataLen int
-	RawData []byte
-}
-
-func (r *RawCANMessage) GetCANID() uint32 {
-	return r.CANID
-}
-
-func (r *RawCANMessage) GetDataLength() int {
-	return r.DataLen
-}
-
-func (r *RawCANMessage) GetRawData() []byte {
-	return r.RawData
-}
-
+// Message represents a cannelloni CAN message.
 type Message struct {
-	internal.BaseMessage
+	message.Base
 
-	SeqNum       uint8
+	seqNum uint8
+
+	// Messages is the list of CAN messages contained in a cannelloni frame.
+	Messages []can.RawMessage
+	// MessageCount is the number of CAN messages.
 	MessageCount int
-	Messages     []can.RawMessage
-}
-
-func (msg *Message) GetSequenceNumber() uint64 {
-	return uint64(msg.SeqNum)
-}
-
-func (msg *Message) GetRawCANMessages() []can.RawMessage {
-	return msg.Messages[:msg.MessageCount]
 }
 
 func newMessage() *Message {
@@ -51,4 +30,14 @@ func newMessage() *Message {
 		MessageCount: 0,
 		Messages:     make([]can.RawMessage, defaultCANMessageNum),
 	}
+}
+
+// GetSequenceNumber returns the sequence number of the cannelloni frame.
+func (msg *Message) GetSequenceNumber() uint64 {
+	return uint64(msg.seqNum)
+}
+
+// GetRawMessages returns the list of CAN messages contained in the cannelloni frame.
+func (msg *Message) GetRawMessages() []can.RawMessage {
+	return msg.Messages[:msg.MessageCount]
 }

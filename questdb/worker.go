@@ -57,26 +57,26 @@ func (w *worker) Deliver(ctx context.Context, msg *Message) error {
 	tmpInsRows := int64(0)
 
 	for row := range msg.iterRows() {
-		query := w.sender.Table(row.Table)
+		query := w.sender.Table(row.table)
 
-		for _, symbol := range row.Symbols {
-			query.Symbol(symbol.Name, symbol.Value)
+		for _, symbol := range row.symbols {
+			query.Symbol(symbol.name, symbol.value)
 		}
 
-		for _, col := range row.Columns {
-			switch col.Type {
+		for _, col := range row.columns {
+			switch col.typ {
 			case ColumnTypeBool:
-				query.BoolColumn(col.Name, col.Value.(bool))
+				query.BoolColumn(col.name, col.value.(bool))
 			case ColumnTypeInt:
-				query.Int64Column(col.Name, col.Value.(int64))
+				query.Int64Column(col.name, col.value.(int64))
 			case ColumnTypeLong:
-				query.Long256Column(col.Name, col.Value.(*big.Int))
+				query.Long256Column(col.name, col.value.(*big.Int))
 			case ColumnTypeFloat:
-				query.Float64Column(col.Name, col.Value.(float64))
+				query.Float64Column(col.name, col.value.(float64))
 			case ColumnTypeString:
-				query.StringColumn(col.Name, col.Value.(string))
+				query.StringColumn(col.name, col.value.(string))
 			case ColumnTypeTimestamp:
-				query.TimestampColumn(col.Name, col.Value.(time.Time))
+				query.TimestampColumn(col.name, col.value.(time.Time))
 			}
 		}
 
@@ -88,53 +88,6 @@ func (w *worker) Deliver(ctx context.Context, msg *Message) error {
 	}
 
 	w.insertedRows.Add(tmpInsRows)
-
-	// // Get the result from the user defined handler
-	// res, err := w.handler.Handle(ctx, msg)
-	// if err != nil {
-	// 	return err
-	// }
-	// span.AddEvent("message handled")
-
-	// // Check if the result is nil
-	// if res == nil {
-	// 	w.tel.LogWarn("received nil result from handler")
-	// 	return nil
-	// }
-
-	// tmpInsRows := int64(0)
-
-	// // For each row, build the corresponding questDB query
-	// for row := range res.iterRows() {
-	// 	query := w.sender.Table(row.Table)
-
-	// 	for _, col := range row.Columns {
-	// 		switch col.Type {
-	// 		case ColumnTypeBool:
-	// 			query.BoolColumn(col.Name, col.Value.(bool))
-	// 		case ColumnTypeInt:
-	// 			query.Int64Column(col.Name, col.Value.(int64))
-	// 		case ColumnTypeLong:
-	// 			query.Long256Column(col.Name, col.Value.(*big.Int))
-	// 		case ColumnTypeFloat:
-	// 			query.Float64Column(col.Name, col.Value.(float64))
-	// 		case ColumnTypeSymbol:
-	// 			query.Symbol(col.Name, col.Value.(string))
-	// 		case ColumnTypeString:
-	// 			query.StringColumn(col.Name, col.Value.(string))
-	// 		case ColumnTypeTimestamp:
-	// 			query.TimestampColumn(col.Name, col.Value.(time.Time))
-	// 		}
-	// 	}
-
-	// 	if err := query.At(ctx, msg.GetTimestamp()); err != nil {
-	// 		return err
-	// 	}
-
-	// 	tmpInsRows++
-	// }
-
-	// w.insertedRows.Add(tmpInsRows)
 
 	return nil
 }

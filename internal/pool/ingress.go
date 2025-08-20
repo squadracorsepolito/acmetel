@@ -6,10 +6,11 @@ import (
 	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
 // Ingress is a worker pool intended to be used by an ingress stage.
-type Ingress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
+type Ingress[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -25,7 +26,7 @@ type Ingress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, Ini
 }
 
 // NewIngress returns a new ingress worker pool.
-func NewIngress[W, InitArgs any, Out internal.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *Config) *Ingress[W, InitArgs, Out, WPtr] {
+func NewIngress[W, InitArgs any, Out message.Message, WPtr IngressWorkerPtr[W, InitArgs, Out]](tel *internal.Telemetry, cfg *Config) *Ingress[W, InitArgs, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8
 
 	return &Ingress[W, InitArgs, Out, WPtr]{

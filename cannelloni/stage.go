@@ -4,15 +4,15 @@ import (
 	"context"
 
 	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
-type Stage[T internal.RawDataMessage] struct {
+type Stage[T message.Serializable] struct {
 	*stage.HandlerWithROB[T, *Message, worker[T], any, *worker[T]]
 }
 
-func NewStage[T internal.RawDataMessage](inputConnector connector.Connector[T], outputConnector connector.Connector[*Message], cfg *Config) *Stage[T] {
+func NewStage[T message.Serializable](inputConnector connector.Connector[T], outputConnector connector.Connector[*Message], cfg *Config) *Stage[T] {
 	return &Stage[T]{
 		HandlerWithROB: stage.NewHandlerWithROB[T, *Message, worker[T], any](
 			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig, cfg.ROBConfig, cfg.ROBTimeout,

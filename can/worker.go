@@ -12,7 +12,7 @@ type workerArgs struct {
 	decoder *decoder
 }
 
-type worker[T msgIn] struct {
+type worker[T RawCANMessageCarrier] struct {
 	tel *internal.Telemetry
 
 	decoder *decoder
@@ -34,13 +34,13 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 	res := newMessage()
 	res.SetTimestamp(msgIn.GetTimestamp())
 
-	for _, msg := range msgIn.GetRawCANMessages() {
+	for _, msg := range msgIn.GetRawMessages() {
 		canID := msg.CANID
 
 		decodings := w.decoder.decode(ctx, canID, msg.RawData)
 		for _, dec := range decodings {
-			sig := CANSignal{
-				CANID:    int64(canID),
+			sig := Signal{
+				CANID:    canID,
 				Name:     dec.Signal.Name(),
 				RawValue: dec.RawValue,
 			}
@@ -72,7 +72,7 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 		}
 	}
 
-	span.SetAttributes(attribute.Int("message_count", len(msgIn.GetRawCANMessages())))
+	span.SetAttributes(attribute.Int("message_count", len(msgIn.GetRawMessages())))
 
 	return res, nil
 }

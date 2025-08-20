@@ -7,6 +7,7 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/can"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -25,7 +26,7 @@ type frame struct {
 	messages       []frameMessage
 }
 
-type worker[T internal.RawDataMessage] struct {
+type worker[T message.Serializable] struct {
 	tel *internal.Telemetry
 }
 
@@ -41,14 +42,14 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 	ctx, span := w.tel.NewTrace(ctx, "process cannelloni frame")
 	defer span.End()
 
-	f, err := w.decodeFrame(msgIn.GetRawData())
+	f, err := w.decodeFrame(msgIn.GetBytes())
 	if err != nil {
 		return nil, err
 	}
 
 	res := newMessage()
 
-	res.SeqNum = f.sequenceNumber
+	res.seqNum = f.sequenceNumber
 	res.SetReceiveTime(msgIn.GetReceiveTime())
 
 	messageCount := len(f.messages)

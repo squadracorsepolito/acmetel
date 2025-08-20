@@ -1,12 +1,14 @@
 package pool
 
-import "github.com/squadracorsepolito/acmetel/internal"
+import (
+	"github.com/squadracorsepolito/acmetel/internal/message"
+)
 
-type withOutput[T internal.Message] struct {
+type withOutput[T message.Message] struct {
 	ch chan T
 }
 
-func newWithOutput[T internal.Message](chSize int) *withOutput[T] {
+func newWithOutput[T message.Message](chSize int) *withOutput[T] {
 	return &withOutput[T]{
 		ch: make(chan T, chSize),
 	}

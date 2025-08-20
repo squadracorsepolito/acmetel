@@ -6,124 +6,193 @@ import (
 	"slices"
 	"time"
 
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
+// Message represents a QuestDB message.
+// It contains the definition of the rows and columns to be inserted
+// into the database.
 type Message struct {
-	internal.BaseMessage
+	message.Base
 
-	Timestamp time.Time
-	Rows      []*Row
+	rows []*Row
 }
 
+// NewMessage returns a new QuestDB message.
 func NewMessage() *Message {
 	return &Message{}
 }
 
+// AddRow adds a row to the message.
 func (m *Message) AddRow(row *Row) {
-	if row != nil {
-		m.Rows = append(m.Rows, row)
-	}
+	m.rows = append(m.rows, row)
 }
 
+// AddRows adds multiple rows to the message.
 func (m *Message) AddRows(rows ...*Row) {
-	if rows == nil {
+	if len(m.rows) == 0 {
+		m.rows = rows
 		return
 	}
 
-	if len(m.Rows) == 0 {
-		m.Rows = rows
-		return
-	}
+	m.rows = append(m.rows, rows...)
+}
 
-	m.Rows = append(m.Rows, rows...)
+// GetRows returns the rows of the message.
+func (m *Message) GetRows() []*Row {
+	return m.rows
 }
 
 func (m *Message) iterRows() iter.Seq[*Row] {
-	return slices.Values(m.Rows)
+	return slices.Values(m.rows)
 }
 
+// ColumnType represents the type of a column.
+// It does not include the symbol column since it is defined
+// as a stand-alone struct in the row.
 type ColumnType int
 
 const (
+	// ColumnTypeBool defines a boolean column.
 	ColumnTypeBool ColumnType = iota
+	// ColumnTypeInt defines an integer column.
 	ColumnTypeInt
+	// ColumnTypeLong defines a long integer column.
 	ColumnTypeLong
+	// ColumnTypeFloat defines a float column.
 	ColumnTypeFloat
+	// ColumnTypeString defines a string column.
 	ColumnTypeString
+	// ColumnTypeTimestamp defines a timestamp column.
 	ColumnTypeTimestamp
 )
 
+// Column represents a column of a row.
 type Column struct {
-	Name  string
-	Type  ColumnType
-	Value any
+	name  string
+	typ   ColumnType
+	value any
 }
 
-func newColumn(name string, typ ColumnType, value any) *Column {
-	return &Column{
-		Name:  name,
-		Type:  typ,
-		Value: value,
+func newColumn(name string, typ ColumnType, value any) Column {
+	return Column{
+		name:  name,
+		typ:   typ,
+		value: value,
 	}
 }
 
-func NewBoolColumn(name string, value bool) *Column {
+// NewBoolColumn returns a new boolean column.
+func NewBoolColumn(name string, value bool) Column {
 	return newColumn(name, ColumnTypeBool, value)
 }
 
-func NewIntColumn(name string, value int64) *Column {
+// NewIntColumn returns a new integer column.
+func NewIntColumn(name string, value int64) Column {
 	return newColumn(name, ColumnTypeInt, value)
 }
 
-func NewLongColumn(name string, value *big.Int) *Column {
+// NewLongColumn returns a new long integer column.
+func NewLongColumn(name string, value *big.Int) Column {
 	return newColumn(name, ColumnTypeLong, value)
 }
 
-func NewFloatColumn(name string, value float64) *Column {
+// NewFloatColumn returns a new float column.
+func NewFloatColumn(name string, value float64) Column {
 	return newColumn(name, ColumnTypeFloat, value)
 }
 
-func NewStringColumn(name string, value string) *Column {
+// NewStringColumn returns a new string column.
+func NewStringColumn(name string, value string) Column {
 	return newColumn(name, ColumnTypeString, value)
 }
 
-func NewTimestampColumn(name string, value time.Time) *Column {
+// NewTimestampColumn returns a new timestamp column.
+func NewTimestampColumn(name string, value time.Time) Column {
 	return newColumn(name, ColumnTypeTimestamp, value)
 }
 
-type Symbol struct {
-	Name  string
-	Value string
+// GetName returns the name of the column.
+func (c Column) GetName() string {
+	return c.name
 }
 
-func NewSymbol(name string, value string) *Symbol {
-	return &Symbol{
-		Name:  name,
-		Value: value,
+// GetType returns the type of the column.
+func (c Column) GetType() ColumnType {
+	return c.typ
+}
+
+// GetValue returns the value of the column.
+func (c Column) GetValue() any {
+	return c.value
+}
+
+// Symbol represents a symbol column.
+// It is defined as a stand-alone struct because a symbol column
+// must be inserted before any other column.
+type Symbol struct {
+	name  string
+	value string
+}
+
+// NewSymbol returns a new symbol.
+func NewSymbol(name string, value string) Symbol {
+	return Symbol{
+		name:  name,
+		value: value,
 	}
 }
 
-type Row struct {
-	Table   string
-	Symbols []*Symbol
-	Columns []*Column
+// GetName returns the name of the symbol.
+func (s Symbol) GetName() string {
+	return s.name
 }
 
+// GetValue returns the value of the symbol.
+func (s Symbol) GetValue() string {
+	return s.value
+}
+
+// Row represents a row to be inserted into the database.
+type Row struct {
+	table   string
+	symbols []Symbol
+	columns []Column
+}
+
+// NewRow returns a new row.
 func NewRow(table string) *Row {
 	return &Row{
-		Table: table,
+		table: table,
 	}
 }
 
-func (r *Row) AddSymbol(symbol *Symbol) {
-	if symbol != nil {
-		r.Symbols = append(r.Symbols, symbol)
-	}
+// AddSymbol adds a symbol to the row.
+func (r *Row) AddSymbol(symbol Symbol) {
+	r.symbols = append(r.symbols, symbol)
 }
 
-func (r *Row) AddColumn(column *Column) {
-	if column != nil {
-		r.Columns = append(r.Columns, column)
+// AddSymbols adds multiple symbols to the row.
+func (r *Row) AddSymbols(symbols ...Symbol) {
+	if len(r.symbols) == 0 {
+		r.symbols = symbols
+		return
 	}
+
+	r.symbols = append(r.symbols, symbols...)
+}
+
+// AddColumn adds a column to the row.
+func (r *Row) AddColumn(column Column) {
+	r.columns = append(r.columns, column)
+}
+
+// AddColumns adds multiple columns to the row.
+func (r *Row) AddColumns(columns ...Column) {
+	if len(r.columns) == 0 {
+		r.columns = columns
+		return
+	}
+
+	r.columns = append(r.columns, columns...)
 }

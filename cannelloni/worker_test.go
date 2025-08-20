@@ -4,14 +4,14 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
 type dummyMsgIn struct {
-	internal.BaseMessage
+	message.Base
 }
 
-func (d *dummyMsgIn) GetRawData() []byte {
+func (d *dummyMsgIn) GetBytes() []byte {
 	return nil
 }
 

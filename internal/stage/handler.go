@@ -129,7 +129,7 @@ func (s *Handler[MIn, MOut, W, WArgs, WPtr]) Close() {
 	s.writerWg.Wait()
 }
 
-type HandlerWithROB[MIn msg, MOut reOrderableMsg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
+type HandlerWithROB[MIn msg, MOut reOrdMsg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]] struct {
 	*Handler[MIn, MOut, W, WArgs, WPtr]
 
 	rob        *rob.ROB[MOut]
@@ -142,7 +142,7 @@ type HandlerWithROB[MIn msg, MOut reOrderableMsg, W, WArgs any, WPtr handlerWork
 	droppedMessages atomic.Int64
 }
 
-func NewHandlerWithROB[MIn msg, MOut reOrderableMsg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]](
+func NewHandlerWithROB[MIn msg, MOut reOrdMsg, W, WArgs any, WPtr handlerWorkerPtr[W, WArgs, MIn, MOut]](
 	name string, inputConnector connector.Connector[MIn], outputConnector connector.Connector[MOut],
 	poolCfg *pool.Config, robCfg *rob.Config, robTimeout time.Duration,
 ) *HandlerWithROB[MIn, MOut, W, WArgs, WPtr] {

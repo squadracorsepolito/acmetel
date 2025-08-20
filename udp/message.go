@@ -1,18 +1,19 @@
 package udp
 
-import "github.com/squadracorsepolito/acmetel/internal"
+import (
+	"github.com/squadracorsepolito/acmetel/internal/message"
+)
 
-var _ internal.RawDataMessage = (*Message)(nil)
+var _ message.Serializable = (*Message)(nil)
 
+// Message represents a UDP message.
 type Message struct {
-	internal.BaseMessage
+	message.Base
 
-	Data    []byte
+	// Data is the payload of a UDP datagram.
+	Data []byte
+	// DataLen is the number of bytes of the payload.
 	DataLen int
-}
-
-func (m *Message) GetRawData() []byte {
-	return m.Data
 }
 
 func newMessage(data []byte, dataLen int) *Message {
@@ -20,4 +21,9 @@ func newMessage(data []byte, dataLen int) *Message {
 		Data:    data,
 		DataLen: dataLen,
 	}
+}
+
+// GetBytes returns the bytes of the UDP payload.
+func (m *Message) GetBytes() []byte {
+	return m.Data
 }

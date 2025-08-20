@@ -6,10 +6,11 @@ import (
 	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
 // Handler is a worker pool intended to be used by an handler stage.
-type Handler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
+type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
 	*withOutput[Out]
 
 	tel *internal.Telemetry
@@ -29,7 +30,7 @@ type Handler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W,
 }
 
 // NewHandler returns a new handler worker pool.
-func NewHandler[W, InitArgs any, In, Out internal.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
+func NewHandler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
 	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
 
 	return &Handler[W, InitArgs, In, Out, WPtr]{
@@ -68,12 +69,14 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
 }
 
 func (p *Handler[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Context) {
+	startWorkerCh := p.scaler.getStartCh()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-p.scaler.getStartCh():
+		case <-startWorkerCh:
 			go p.runWorker(ctx)
 		}
 	}
