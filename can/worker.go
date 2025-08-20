@@ -28,11 +28,15 @@ func (w *worker[T]) Init(_ context.Context, workerArgs *workerArgs) error {
 }
 
 func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
-	ctx, span := w.tel.NewTrace(ctx, "process raw CAN message batch")
+	// Extract the span context from the input message
+	ctx, span := w.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle CAN message batch")
 	defer span.End()
 
-	res := newMessage()
-	res.SetTimestamp(msgIn.GetTimestamp())
+	// Create the CAN message
+	canMsg := newMessage()
+
+	canMsg.SetReceiveTime(msgIn.GetReceiveTime())
+	canMsg.SetTimestamp(msgIn.GetTimestamp())
 
 	for _, msg := range msgIn.GetRawMessages() {
 		canID := msg.CANID
@@ -67,14 +71,16 @@ func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
 				sig.ValueEnum = dec.ValueAsEnum()
 			}
 
-			res.Signals = append(res.Signals, sig)
-			res.SignalCount++
+			canMsg.Signals = append(canMsg.Signals, sig)
+			canMsg.SignalCount++
 		}
 	}
 
-	span.SetAttributes(attribute.Int("message_count", len(msgIn.GetRawMessages())))
+	// Save the span in the message
+	span.SetAttributes(attribute.Int("signal_count", canMsg.SignalCount))
+	canMsg.SaveSpan(span)
 
-	return res, nil
+	return canMsg, nil
 }
 
 func (w *worker[T]) Close(_ context.Context) error {

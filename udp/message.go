@@ -10,20 +10,20 @@ var _ message.Serializable = (*Message)(nil)
 type Message struct {
 	message.Base
 
-	// Data is the payload of a UDP datagram.
-	Data []byte
-	// DataLen is the number of bytes of the payload.
-	DataLen int
+	// Payload of the UDP datagram.
+	Payload []byte
+	// PayloadSize is the number of bytes of the payload.
+	PayloadSize int
 }
 
-func newMessage(data []byte, dataLen int) *Message {
+func newMessage(payload []byte, payloadSize int) *Message {
 	return &Message{
-		Data:    data,
-		DataLen: dataLen,
+		Payload:     payload,
+		PayloadSize: payloadSize,
 	}
 }
 
 // GetBytes returns the bytes of the UDP payload.
 func (m *Message) GetBytes() []byte {
-	return m.Data
+	return m.Payload
 }

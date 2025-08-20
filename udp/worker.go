@@ -55,11 +55,15 @@ func (w *worker) Init(ctx context.Context, args *workerArgs) error {
 }
 
 func (w *worker) Receive(ctx context.Context) (*Message, bool, error) {
+	// read the UDP payload
 	_, err := w.conn.Read(w.buf)
 	if err != nil {
+		// Check if the connection is closed
 		if errors.Is(err, net.ErrClosed) {
 			select {
 			case <-ctx.Done():
+				// If the context is done, signal
+				// the worker pool to exit the run loop
 				return nil, true, nil
 
 			default:
@@ -74,25 +78,31 @@ func (w *worker) Receive(ctx context.Context) (*Message, bool, error) {
 		return nil, false, err
 	}
 
-	_, span := w.tel.NewTrace(ctx, "process UDP frame")
+	// Create the trace for the incoming datagram
+	_, span := w.tel.NewTrace(ctx, "receive UDP datagram")
 	defer span.End()
 
-	dataLen := len(w.buf)
-	data := make([]byte, dataLen)
-	copy(data, w.buf)
+	// Extract the payload from the buffer
+	payloadSize := len(w.buf)
+	payload := make([]byte, payloadSize)
+	copy(payload, w.buf)
 
-	res := newMessage(data, dataLen)
+	// Create the UDP message
+	udpMsg := newMessage(payload, payloadSize)
 
+	// Set the receive time and the timestamp
 	recvTime := time.Now()
-	res.SetReceiveTime(recvTime)
-	res.SetTimestamp(recvTime)
+	udpMsg.SetReceiveTime(recvTime)
+	udpMsg.SetTimestamp(recvTime)
 
-	span.SetAttributes(attribute.Int("data_len", dataLen))
-	res.SaveSpan(span)
+	// Save the span into the message
+	span.SetAttributes(attribute.Int("payload_size", payloadSize))
+	udpMsg.SaveSpan(span)
 
-	w.receivedBytes.Add(int64(dataLen))
+	// Update metrics
+	w.receivedBytes.Add(int64(payloadSize))
 
-	return res, false, nil
+	return udpMsg, false, nil
 }
 
 func (w *worker) Close(_ context.Context) error {

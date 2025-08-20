@@ -17,13 +17,10 @@ func (h *rawHandler) Init(_ context.Context) error {
 	return nil
 }
 
-func (h *rawHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Message, error) {
-	nextMsg := questdb.NewMessage()
-	nextMsg.SetTimestamp(msg.GetTimestamp())
+func (h *rawHandler) Handle(_ context.Context, canMsg *can.Message, qdbMsg *questdb.Message) error {
+	rows := make([]*questdb.Row, 0, canMsg.SignalCount)
 
-	rows := make([]*questdb.Row, 0, msg.SignalCount)
-
-	for _, sig := range msg.Signals {
+	for _, sig := range canMsg.Signals {
 		valType := sig.Type
 
 		row := questdb.NewRow(h.getTable(valType))
@@ -53,9 +50,9 @@ func (h *rawHandler) Handle(_ context.Context, msg *can.Message) (*questdb.Messa
 		rows = append(rows, row)
 	}
 
-	nextMsg.AddRows(rows...)
+	qdbMsg.AddRows(rows...)
 
-	return nextMsg, nil
+	return nil
 }
 
 func (h *rawHandler) Close() {}

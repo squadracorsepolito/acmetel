@@ -66,6 +66,8 @@ func main() {
 
 	questDBCfg := questdb.NewDefaultConfig()
 	questDBCfg.PoolConfig.MaxWorkers = 32
+	questDBCfg.PoolConfig.InitialWorkers = 8
+	questDBCfg.PoolConfig.MinWorkers = 8
 	questDBCfg.PoolConfig.QueueDepthPerWorker = 1
 	questDBStage := questdb.NewStage(rawToQuestDB, questDBCfg)
 

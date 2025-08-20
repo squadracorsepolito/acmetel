@@ -85,9 +85,7 @@ func (ip *Ingress[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 		default:
 		}
 
-		tracedCtx, span := ip.tel.NewTrace(ctx, "receive message")
-
-		msgOut, stop, err := worker.Receive(tracedCtx)
+		msgOut, stop, err := worker.Receive(ctx)
 		if err != nil {
 			ip.tel.LogError("failed to receive message", err)
 			ip.receivingErrors.Add(1)
@@ -100,8 +98,6 @@ func (ip *Ingress[W, InitArgs, Out, WPtr]) runWorker(ctx context.Context) {
 		ip.sendOutput(msgOut)
 
 	loopCleanup:
-		span.End()
-
 		if stop {
 			return
 		}

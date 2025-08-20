@@ -39,36 +39,44 @@ func (w *worker[T]) Init(_ context.Context, _ any) error {
 }
 
 func (w *worker[T]) Handle(ctx context.Context, msgIn T) (*Message, error) {
-	ctx, span := w.tel.NewTrace(ctx, "process cannelloni frame")
+	// Extract the span context from the input message
+	ctx, span := w.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
 	defer span.End()
 
+	// Decode the frame
 	f, err := w.decodeFrame(msgIn.GetBytes())
 	if err != nil {
 		return nil, err
 	}
 
-	res := newMessage()
+	// Create the cannelloni message with the decoded frame data
+	cannelloniMsg := newMessage()
 
-	res.seqNum = f.sequenceNumber
-	res.SetReceiveTime(msgIn.GetReceiveTime())
+	// Set the receive time, but ignore the timestamp
+	// because it will be set by the rob
+	cannelloniMsg.SetReceiveTime(msgIn.GetReceiveTime())
+
+	cannelloniMsg.seqNum = f.sequenceNumber
 
 	messageCount := len(f.messages)
-	res.MessageCount = messageCount
+	cannelloniMsg.MessageCount = messageCount
 	if messageCount > defaultCANMessageNum {
-		res.Messages = make([]can.RawMessage, messageCount)
+		cannelloniMsg.Messages = make([]can.RawMessage, messageCount)
 	}
 
 	for idx, tmpMsg := range f.messages {
-		res.Messages[idx] = can.RawMessage{
+		cannelloniMsg.Messages[idx] = can.RawMessage{
 			CANID:   tmpMsg.canID,
 			DataLen: int(tmpMsg.dataLen),
 			RawData: tmpMsg.data,
 		}
 	}
 
+	// Save the span into the message
 	span.SetAttributes(attribute.Int("message_count", messageCount))
+	cannelloniMsg.SaveSpan(span)
 
-	return res, nil
+	return cannelloniMsg, nil
 }
 
 func (w *worker[T]) Close(_ context.Context) error {

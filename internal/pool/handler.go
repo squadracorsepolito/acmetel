@@ -109,20 +109,18 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		}
 	}()
 
+	stopCh := p.scaler.getStopCh(workerID)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-p.scaler.getStopCh(workerID):
+		case <-stopCh:
 			return
 
 		case msgIn := <-p.inputCh:
-			tracedCtx, span := p.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle message")
-
-			receiveTime := msgIn.GetReceiveTime()
-
-			msgOut, err := worker.Handle(tracedCtx, msgIn)
+			msgOut, err := worker.Handle(ctx, msgIn)
 			if err != nil {
 				p.tel.LogError("failed to do work", err, "worker_id", workerID)
 				p.handlingErrors.Add(1)
@@ -130,18 +128,12 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 				goto loopCleanup
 			}
 
-			msgOut.SetReceiveTime(receiveTime)
-
 			p.handledMessages.Add(1)
-			msgOut.SaveSpan(span)
 
 			p.sendOutput(msgOut)
 
-			span.AddEvent("message sent to next stage")
-
 		loopCleanup:
 			p.scaler.notifyTaskCompleted()
-			span.End()
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	qdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/squadracorsepolito/acmetel/internal"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type workerArgs struct {
@@ -49,14 +50,13 @@ func (w *worker) Init(ctx context.Context, args *workerArgs) error {
 	return nil
 }
 
-func (w *worker) Deliver(ctx context.Context, msg *Message) error {
-	// Add span to trace the funtion
-	ctx, span := w.tel.NewTrace(ctx, "insert message")
+func (w *worker) Deliver(ctx context.Context, qdbMsg *Message) error {
+	// Extract the span context from the input message
+	ctx, span := w.tel.NewTrace(qdbMsg.LoadSpanContext(ctx), "deliver QuestDB rows")
 	defer span.End()
 
 	tmpInsRows := int64(0)
-
-	for row := range msg.iterRows() {
+	for row := range qdbMsg.iterRows() {
 		query := w.sender.Table(row.table)
 
 		for _, symbol := range row.symbols {
@@ -80,13 +80,16 @@ func (w *worker) Deliver(ctx context.Context, msg *Message) error {
 			}
 		}
 
-		if err := query.At(ctx, msg.GetTimestamp()); err != nil {
+		if err := query.At(ctx, qdbMsg.GetTimestamp()); err != nil {
 			return err
 		}
 
 		tmpInsRows++
 	}
 
+	span.SetAttributes(attribute.Int64("inserted_rows", tmpInsRows))
+
+	// Update metrics
 	w.insertedRows.Add(tmpInsRows)
 
 	return nil

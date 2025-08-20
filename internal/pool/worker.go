@@ -15,6 +15,7 @@ type worker[InitArgs any] interface {
 // EgressWorker is the interface for an egress worker.
 type EgressWorker[InitArgs, In any] interface {
 	worker[InitArgs]
+
 	Deliver(ctx context.Context, task In) error
 }
 
@@ -27,6 +28,7 @@ type EgressWorkerPtr[W, InitArgs, In any] interface {
 // HandlerWorker is the interface for a handler worker.
 type HandlerWorker[InitArgs, In, Out any] interface {
 	worker[InitArgs]
+
 	Handle(ctx context.Context, task In) (Out, error)
 }
 
@@ -39,6 +41,7 @@ type HandlerWorkerPtr[W, InitArgs, In, Out any] interface {
 // IngressWorker is the interface for an ingress worker.
 type IngressWorker[InitArgs, Out any] interface {
 	worker[InitArgs]
+
 	Receive(ctx context.Context) (Out, bool, error)
 }
 

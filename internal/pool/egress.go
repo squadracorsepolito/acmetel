@@ -109,20 +109,18 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 		}
 	}()
 
+	stopCh := ep.scaler.getStopCh(workerID)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-ep.scaler.getStopCh(workerID):
+		case <-stopCh:
 			return
 
 		case msgIn := <-ep.inputCh:
-			tracedCtx, span := ep.tel.NewTrace(msgIn.LoadSpanContext(ctx), "deliver message")
-
-			receiveTime := msgIn.GetReceiveTime()
-
-			if err := worker.Deliver(tracedCtx, msgIn); err != nil {
+			if err := worker.Deliver(ctx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)
 				ep.deliveringErrors.Add(1)
 
@@ -131,11 +129,10 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 
 			ep.deliveredMessages.Add(1)
 
-			ep.messageTotHistogram.Record(tracedCtx, time.Since(receiveTime).Milliseconds())
+			ep.messageTotHistogram.Record(ctx, time.Since(msgIn.GetReceiveTime()).Milliseconds())
 
 		loopCleanup:
 			ep.scaler.notifyTaskCompleted()
-			span.End()
 		}
 	}
 }
