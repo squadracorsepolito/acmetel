@@ -1,7 +1,8 @@
-package udp
+package ticker
 
 import (
 	"context"
+	"time"
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal/stage"
@@ -10,29 +11,27 @@ import (
 type Stage struct {
 	*stage.Ingress[*Message]
 
-	ipAddr string
-	port   uint16
-
 	source *source
+
+	interval time.Duration
 }
 
 func NewStage(outputConnector connector.Connector[*Message], cfg *Config) *Stage {
 	source := newSource()
 
 	return &Stage{
-		Ingress: stage.NewIngress("udp", source, outputConnector, cfg.WriterQueueSize),
-
-		ipAddr: cfg.IPAddr,
-		port:   cfg.Port,
+		Ingress: stage.NewIngress(
+			"ticker", source, outputConnector, cfg.WriterQueueSize,
+		),
 
 		source: source,
+
+		interval: cfg.Interval,
 	}
 }
 
 func (s *Stage) Init(ctx context.Context) error {
-	if err := s.source.init(s.ipAddr, s.port); err != nil {
-		return err
-	}
+	s.source.init(s.interval)
 
 	return s.Ingress.Init(ctx)
 }

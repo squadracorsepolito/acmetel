@@ -71,12 +71,14 @@ func (ep *Egress[In, W, InitArgs, WPtr]) Run(ctx context.Context) {
 }
 
 func (ep *Egress[In, W, InitArgs, WPtr]) runStartWorkerListener(ctx context.Context) {
+	startCh := ep.scaler.getStartCh()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-ep.scaler.getStartCh():
+		case <-startCh:
 			go ep.runWorker(ctx)
 		}
 	}

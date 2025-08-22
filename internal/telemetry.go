@@ -6,6 +6,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -15,8 +16,10 @@ type Telemetry struct {
 
 	l *Logger
 
-	tracer trace.Tracer
-	meter  metric.Meter
+	tracer          trace.Tracer
+	tracePropagator propagation.TextMapPropagator
+
+	meter metric.Meter
 }
 
 func NewTelemetry(stageKind, stageName string) *Telemetry {
@@ -26,8 +29,10 @@ func NewTelemetry(stageKind, stageName string) *Telemetry {
 
 		l: NewLogger(stageKind, stageName),
 
-		tracer: otel.GetTracerProvider().Tracer("acmetel"),
-		meter:  otel.GetMeterProvider().Meter("acmetel"),
+		tracer:          otel.GetTracerProvider().Tracer("acmetel"),
+		tracePropagator: otel.GetTextMapPropagator(),
+
+		meter: otel.GetMeterProvider().Meter("acmetel"),
 	}
 }
 
@@ -65,6 +70,10 @@ func (t *Telemetry) getMetricDefaultAttributes() metric.MeasurementOption {
 		attribute.String("acmetel.stage_kind", t.stageKind),
 		attribute.String("acmetel.stage_name", t.stageName),
 	)
+}
+
+func (t *Telemetry) InjectTrace(ctx context.Context, carrier propagation.TextMapCarrier) {
+	t.tracePropagator.Inject(ctx, carrier)
 }
 
 func (t *Telemetry) NewCounter(name string, getter func() int64, opts ...metric.Int64ObservableCounterOption) {

@@ -50,3 +50,24 @@ type IngressWorkerPtr[W, InitArgs, Out any] interface {
 	*W
 	IngressWorker[InitArgs, Out]
 }
+
+// IngressWorker is the interface for an ingress worker.
+type IngressWorker2[WArgs, In, Out any] interface {
+	worker[WArgs]
+
+	Receive2(ctx context.Context, task In) (Out, error)
+}
+
+// IngressWorkerPtr is an utility type for the ingress worker.
+type IngressWorkerPtr2[W, WArgs, In, Out any] interface {
+	*W
+	IngressWorker2[WArgs, In, Out]
+}
+
+type BaseWorker struct {
+	Tel *internal.Telemetry
+}
+
+func (w *BaseWorker) SetTelemetry(tel *internal.Telemetry) {
+	w.Tel = tel
+}

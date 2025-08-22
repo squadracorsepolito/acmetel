@@ -3,58 +3,75 @@ package stage
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/internal/pool"
 )
 
-type Ingress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]] struct {
-	tel *internal.Telemetry
-
-	outputConnector connector.Connector[M]
-
-	writerWg *sync.WaitGroup
-
-	workerPool *pool.Ingress[W, WArgs, M, WPtr]
+type Source[Out msg] interface {
+	SetTelemetry(*internal.Telemetry)
+	Run(context.Context, chan<- Out)
 }
 
-func NewIngress[M msg, W, WArgs any, WPtr ingressWorkerPtr[W, WArgs, M]](
-	name string, outputConnector connector.Connector[M], poolCfg *pool.Config,
-) *Ingress[M, W, WArgs, WPtr] {
+type Ingress[Out msg] struct {
+	tel *internal.Telemetry
 
+	source Source[Out]
+
+	outputConnector connector.Connector[Out]
+
+	writerInputCh chan Out
+	writerWg      *sync.WaitGroup
+
+	// Telemetry metrics
+	receivedMessages atomic.Int64
+}
+
+func NewIngress[Out msg](name string, source Source[Out], outputConnector connector.Connector[Out], writerQueueSize int) *Ingress[Out] {
 	tel := internal.NewTelemetry("ingress", name)
 
-	return &Ingress[M, W, WArgs, WPtr]{
+	source.SetTelemetry(tel)
+
+	return &Ingress[Out]{
 		tel: tel,
+
+		source: source,
 
 		outputConnector: outputConnector,
 
-		writerWg: &sync.WaitGroup{},
-
-		workerPool: pool.NewIngress[W, WArgs, M, WPtr](tel, poolCfg),
+		writerInputCh: make(chan Out, writerQueueSize),
+		writerWg:      &sync.WaitGroup{},
 	}
 }
 
-func (i *Ingress[M, W, WArgs, WPtr]) Init(ctx context.Context, workerArgs WArgs) error {
-	defer i.tel.LogInfo("initialized")
-
-	i.workerPool.Init(ctx, workerArgs)
+func (i *Ingress[Out]) Init(_ context.Context) error {
+	i.initMetrics()
 
 	return nil
 }
 
-func (i *Ingress[M, W, WArgs, WPtr]) runWriter(ctx context.Context) {
+func (i *Ingress[Out]) initMetrics() {
+	i.tel.NewCounter("received_messages", func() int64 { return i.receivedMessages.Load() })
+}
+
+func (i *Ingress[M]) Run(ctx context.Context) {
+	go i.runWriter(ctx)
+
+	i.source.Run(ctx, i.writerInputCh)
+}
+
+func (i *Ingress[M]) runWriter(ctx context.Context) {
 	i.writerWg.Add(1)
 	defer i.writerWg.Done()
-
-	inputCh := i.workerPool.GetOutputCh()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msgOut := <-inputCh:
+		case msgOut := <-i.writerInputCh:
+			i.receivedMessages.Add(1)
+
 			if err := i.outputConnector.Write(msgOut); err != nil {
 				i.tel.LogError("failed to write into output connector", err)
 			}
@@ -62,19 +79,11 @@ func (i *Ingress[M, W, WArgs, WPtr]) runWriter(ctx context.Context) {
 	}
 }
 
-func (i *Ingress[M, W, WArgs, WPtr]) Run(ctx context.Context) {
-	i.tel.LogInfo("running")
-	defer i.tel.LogInfo("stopped")
-
-	go i.runWriter(ctx)
-
-	i.workerPool.Run(ctx)
-}
-
-func (i *Ingress[M, W, WArgs, WPtr]) Close() {
+func (i *Ingress[M]) Close() {
 	i.tel.LogInfo("closing")
 
 	i.outputConnector.Close()
-	i.workerPool.Close()
 	i.writerWg.Wait()
+
+	close(i.writerInputCh)
 }

@@ -1,17 +1,19 @@
-package udp
+package ticker
+
+import (
+	"time"
+)
 
 type Config struct {
 	WriterQueueSize int
 
-	IPAddr string
-	Port   uint16
+	Interval time.Duration
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		WriterQueueSize: 256,
 
-		IPAddr: "127.0.0.1",
-		Port:   20_000,
+		Interval: 100 * time.Millisecond,
 	}
 }
