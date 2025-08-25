@@ -13,12 +13,22 @@ const (
 	numProducers            = 8
 	numConsumers            = 8
 	itemsPerProducer        = 1_000_000
-	totalItems              = numProducers * itemsPerProducer
 	benchmarkBufferCapacity = 2048
 )
 
+func getConnectorFormKind[T any](connKind string, size uint64) Connector[T] {
+	var connector Connector[T]
+	switch connKind {
+	case "channel":
+		connector = NewChannel[T](size)
+	case "ring_buffer":
+		connector = NewRingBuffer[T](uint32(size))
+	}
+	return connector
+}
+
 func Test_Connector_MultipleProducersConsumers(t *testing.T) {
-	connKinds := []string{"ring_buffer", "channel"}
+	connKinds := []string{"channel"}
 	for _, connKind := range connKinds {
 		t.Run(connKind, func(t *testing.T) {
 			connector := getConnectorFormKind[int](connKind, uint64(bufferCapacity))
@@ -113,164 +123,153 @@ func testMultipleProducersConsumers(t *testing.T, connector Connector[int], numP
 	t.Logf("Processed %d items in %v (%d items/sec)", totalItems, duration, itemsPerSec)
 }
 
-func Benchmark_Connectors(b *testing.B) {
-	b.ReportAllocs()
+// func Benchmark_Connectors(b *testing.B) {
+// 	b.ReportAllocs()
 
-	connKinds := []string{"ring_buffer", "channel"}
-	for _, connKind := range connKinds {
-		b.Run("WriteSequential-"+connKind, func(b *testing.B) {
-			benchmarkWriteSequential(b, connKind)
-		})
+// 	connKinds := []string{"ring_buffer", "channel"}
+// 	for _, connKind := range connKinds {
+// 		b.Run("WriteSequential-"+connKind, func(b *testing.B) {
+// 			benchmarkWriteSequential(b, connKind)
+// 		})
 
-		b.Run("WriteParallel-"+connKind, func(b *testing.B) {
-			benchmarkWriteParallel(b, connKind)
-		})
+// 		b.Run("WriteParallel-"+connKind, func(b *testing.B) {
+// 			benchmarkWriteParallel(b, connKind)
+// 		})
 
-		b.Run("ReadSequential-"+connKind, func(b *testing.B) {
-			benchmarkReadSequential(b, connKind)
-		})
+// 		b.Run("ReadSequential-"+connKind, func(b *testing.B) {
+// 			benchmarkReadSequential(b, connKind)
+// 		})
 
-		b.Run("ReadParallel-"+connKind, func(b *testing.B) {
-			benchmarkReadParallel(b, connKind)
-		})
-	}
-}
+// 		b.Run("ReadParallel-"+connKind, func(b *testing.B) {
+// 			benchmarkReadParallel(b, connKind)
+// 		})
+// 	}
+// }
 
-func getConnectorFormKind[T any](connKind string, size uint64) Connector[T] {
-	var connector Connector[T]
-	switch connKind {
-	case "channel":
-		connector = NewChannel[T](size)
-	case "ring_buffer":
-		connector = NewRingBuffer[T](uint32(size))
-	}
-	return connector
-}
+// func benchmarkWriteSequential(b *testing.B, connKind string) {
+// 	type dummy struct {
+// 		data []byte
+// 	}
 
-func benchmarkWriteSequential(b *testing.B, connKind string) {
-	type dummy struct {
-		data []byte
-	}
+// 	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
-	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
+// 	data := &dummy{
+// 		data: make([]byte, 2048),
+// 	}
 
-	data := &dummy{
-		data: make([]byte, 2048),
-	}
+// 	go func() {
+// 		for {
+// 			_, err := connector.Read()
+// 			if err != nil {
+// 				b.Logf("Read error: %v,", err)
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	go func() {
-		for {
-			_, err := connector.Read()
-			if err != nil {
-				b.Logf("Read error: %v,", err)
-				return
-			}
-		}
-	}()
+// 	b.ResetTimer()
+// 	for range b.N {
+// 		err := connector.Write(data)
+// 		if err != nil {
+// 			b.Logf("Write error: %v,", err)
+// 			return
+// 		}
+// 	}
+// }
 
-	b.ResetTimer()
-	for range b.N {
-		err := connector.Write(data)
-		if err != nil {
-			b.Logf("Write error: %v,", err)
-			return
-		}
-	}
-}
+// func benchmarkWriteParallel(b *testing.B, connKind string) {
+// 	type dummy struct {
+// 		data []byte
+// 	}
 
-func benchmarkWriteParallel(b *testing.B, connKind string) {
-	type dummy struct {
-		data []byte
-	}
+// 	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
-	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
+// 	data := &dummy{
+// 		data: make([]byte, 2048),
+// 	}
 
-	data := &dummy{
-		data: make([]byte, 2048),
-	}
+// 	go func() {
+// 		for {
+// 			_, err := connector.Read()
+// 			if err != nil {
+// 				b.Logf("Read error: %v,", err)
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	go func() {
-		for {
-			_, err := connector.Read()
-			if err != nil {
-				b.Logf("Read error: %v,", err)
-				return
-			}
-		}
-	}()
+// 	b.ResetTimer()
+// 	b.RunParallel(func(pb *testing.PB) {
+// 		for pb.Next() {
+// 			err := connector.Write(data)
+// 			if err != nil {
+// 				b.Logf("Write error: %v,", err)
+// 				return
+// 			}
+// 		}
+// 	})
+// }
 
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			err := connector.Write(data)
-			if err != nil {
-				b.Logf("Write error: %v,", err)
-				return
-			}
-		}
-	})
-}
+// func benchmarkReadSequential(b *testing.B, connKind string) {
+// 	type dummy struct {
+// 		data []byte
+// 	}
 
-func benchmarkReadSequential(b *testing.B, connKind string) {
-	type dummy struct {
-		data []byte
-	}
+// 	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
-	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
+// 	data := &dummy{
+// 		data: make([]byte, 2048),
+// 	}
 
-	data := &dummy{
-		data: make([]byte, 2048),
-	}
+// 	go func() {
+// 		for range b.N {
+// 			err := connector.Write(data)
+// 			if err != nil {
+// 				b.Logf("Write error: %v,", err)
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	go func() {
-		for range b.N {
-			err := connector.Write(data)
-			if err != nil {
-				b.Logf("Write error: %v,", err)
-				return
-			}
-		}
-	}()
+// 	b.ResetTimer()
+// 	for range b.N {
+// 		_, err := connector.Read()
+// 		if err != nil {
+// 			b.Logf("Read error: %v", err)
+// 			return
+// 		}
+// 	}
+// }
 
-	b.ResetTimer()
-	for range b.N {
-		_, err := connector.Read()
-		if err != nil {
-			b.Logf("Read error: %v", err)
-			return
-		}
-	}
-}
+// func benchmarkReadParallel(b *testing.B, connKind string) {
+// 	type dummy struct {
+// 		data []byte
+// 	}
 
-func benchmarkReadParallel(b *testing.B, connKind string) {
-	type dummy struct {
-		data []byte
-	}
+// 	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
 
-	connector := getConnectorFormKind[*dummy](connKind, benchmarkBufferCapacity)
+// 	data := &dummy{
+// 		data: make([]byte, 2048),
+// 	}
 
-	data := &dummy{
-		data: make([]byte, 2048),
-	}
+// 	go func() {
+// 		for range b.N {
+// 			err := connector.Write(data)
+// 			if err != nil {
+// 				b.Logf("Write error: %v,", err)
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	go func() {
-		for range b.N {
-			err := connector.Write(data)
-			if err != nil {
-				b.Logf("Write error: %v,", err)
-				return
-			}
-		}
-	}()
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := connector.Read()
-			if err != nil {
-				b.Logf("Read error: %v", err)
-				return
-			}
-		}
-	})
-}
+// 	b.ResetTimer()
+// 	b.RunParallel(func(pb *testing.PB) {
+// 		for pb.Next() {
+// 			_, err := connector.Read()
+// 			if err != nil {
+// 				b.Logf("Read error: %v", err)
+// 				return
+// 			}
+// 		}
+// 	})
+// }

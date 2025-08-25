@@ -11,35 +11,27 @@ import (
 
 var ErrClosed = errors.New("ring buffer: buffer is closed")
 
-type buffer[T any] interface {
-	push(T) bool
-	pop() (T, bool)
-	len() uint32
-}
-
 type BufferKind uint8
 
 const (
 	BufferKindSPSC BufferKind = iota
-	BufferKindSPSC2
 )
 
 func (bk BufferKind) String() string {
 	switch bk {
 	case BufferKindSPSC:
 		return "SPSC"
-	case BufferKindSPSC2:
-		return "SPSC2"
 	default:
 		return "unknown"
 	}
 }
 
 type RingBuffer[T any] struct {
+	// kind is the type of the internal buffer
 	kind BufferKind
 
-	spsc  *spscBuffer[T]
-	spsc2 *spsc2Buffer[T]
+	// spsc is the single producer/single consumer ring buffer
+	spsc *spscBuffer[T]
 
 	_ cpu.CacheLinePad
 
@@ -80,8 +72,6 @@ func NewRingBuffer[T any](capacity uint32, kind BufferKind) *RingBuffer[T] {
 	switch kind {
 	case BufferKindSPSC:
 		rb.spsc = newSPSCBuffer[T](parsedCapacity)
-	case BufferKindSPSC2:
-		rb.spsc2 = newSPSC2Buffer[T](parsedCapacity)
 	}
 
 	return rb
@@ -91,8 +81,6 @@ func (rb *RingBuffer[T]) push(item T) bool {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.push(item)
-	case BufferKindSPSC2:
-		return rb.spsc2.push(item)
 	default:
 		return false
 	}
@@ -102,8 +90,6 @@ func (rb *RingBuffer[T]) pop() (T, bool) {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.pop()
-	case BufferKindSPSC2:
-		return rb.spsc2.pop()
 	default:
 		return *new(T), false
 	}
@@ -113,8 +99,6 @@ func (rb *RingBuffer[T]) len() uint32 {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.len()
-	case BufferKindSPSC2:
-		return rb.spsc2.len()
 	default:
 		return 0
 	}
@@ -247,4 +231,15 @@ cleanup:
 
 func (rb *RingBuffer[T]) Len() uint32 {
 	return rb.len()
+}
+
+func (rb *RingBuffer[T]) Close() {
+	if !rb.isClosed.CompareAndSwap(false, true) {
+		return
+	}
+
+	rb.mux.Lock()
+	rb.notEmpty.Broadcast()
+	rb.notFull.Broadcast()
+	rb.mux.Unlock()
 }
