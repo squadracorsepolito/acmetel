@@ -76,6 +76,10 @@ func (t *Telemetry) InjectTrace(ctx context.Context, carrier propagation.TextMap
 	t.tracePropagator.Inject(ctx, carrier)
 }
 
+func (t *Telemetry) ExtractTraceContext(ctx context.Context, carrier propagation.TextMapCarrier) context.Context {
+	return t.tracePropagator.Extract(ctx, carrier)
+}
+
 func (t *Telemetry) NewCounter(name string, getter func() int64, opts ...metric.Int64ObservableCounterOption) {
 	counter, err := t.meter.Int64ObservableCounter(name, opts...)
 	if err != nil {

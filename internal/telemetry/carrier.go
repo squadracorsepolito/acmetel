@@ -14,9 +14,12 @@ type KafkaHeaderCarrier struct {
 	headers []kafka.Header
 }
 
-func NewKafkaHeaderCarrier(additionalHeaders int) *KafkaHeaderCarrier {
+func NewKafkaHeaderCarrier(headers []kafka.Header) *KafkaHeaderCarrier {
+	h := make([]kafka.Header, 0, len(headers)+textMapPropagatorFields)
+	h = append(h, headers...)
+
 	return &KafkaHeaderCarrier{
-		headers: make([]kafka.Header, 0, additionalHeaders+textMapPropagatorFields),
+		headers: h,
 	}
 }
 
@@ -46,10 +49,6 @@ func (khc *KafkaHeaderCarrier) Keys() []string {
 		keys = append(keys, header.Key)
 	}
 	return keys
-}
-
-func (khc *KafkaHeaderCarrier) AppendHeaders(headers ...kafka.Header) {
-	khc.headers = append(khc.headers, headers...)
 }
 
 func (khc *KafkaHeaderCarrier) Headers() []kafka.Header {

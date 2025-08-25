@@ -10,7 +10,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"github.com/squadracorsepolito/acmetel/internal/telemetry"
 
-	kafka "github.com/segmentio/kafka-go"
+	"github.com/segmentio/kafka-go"
 )
 
 //////////////
@@ -176,10 +176,9 @@ func (kw *kafkaWorker) Deliver(ctx context.Context, msg *KafkaMessage) error {
 	defer span.End()
 
 	// Create the header that carries the trace and eventual user defined headers
-	headerCarrier := telemetry.NewKafkaHeaderCarrier(len(msg.headers))
+	headerCarrier := telemetry.NewKafkaHeaderCarrier(msg.headers)
 
-	// Add the user defined headers first, then inject the trace
-	headerCarrier.AppendHeaders(msg.headers...)
+	// Inject the trace
 	kw.Tel.InjectTrace(ctx, headerCarrier)
 
 	// Create the message to be written
@@ -215,9 +214,7 @@ type KafkaStage struct {
 
 func NewKafkaStage(inputConnector connector.Connector[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
 	return &KafkaStage{
-		Egress: stage.NewEgress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs, *kafkaWorker](
-			"kafka", inputConnector, cfg.PoolConfig,
-		),
+		Egress: stage.NewEgress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs]("kafka", inputConnector, cfg.PoolConfig),
 
 		cfg: cfg,
 	}

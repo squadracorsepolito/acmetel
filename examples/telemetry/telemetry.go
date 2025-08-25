@@ -79,7 +79,7 @@ func newTraceProvider(resource *resource.Resource, exporter sdktrace.SpanExporte
 	return sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(resource),
-		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.05)),
+		//sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.05)),
 	)
 }
 
