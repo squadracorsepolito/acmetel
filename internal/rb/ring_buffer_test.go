@@ -1,6 +1,7 @@
 package rb
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -10,32 +11,53 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	itemsCount     = 1_000_000
-	bufferCapacity = 128
-)
-
-func Test_spscBuffer(t *testing.T) {
-	assert := assert.New(t)
-	b := newSPSCBuffer[int](bufferCapacity)
-	testBuffer(assert, 1, 1, b)
-}
-
 type buffer[T any] interface {
 	push(item T) bool
 	pop() (T, bool)
 }
 
-func testBuffer(assert *assert.Assertions, prodNum, consNum int, buffer buffer[int]) {
+func Test_bufferImplementations(t *testing.T) {
+	const (
+		capacity = 128
+		items    = 1_000_000
+	)
+
+	suite := []struct {
+		kind             BufferKind
+		buffer           buffer[int]
+		prodNum, consNum int
+	}{
+		{BufferKindSPSC, newSPSCBuffer[int](128), 1, 1},
+		{BufferKindMPMC, newMPMCBuffer[int](128), 1, 1},
+		{BufferKindMPMC, newMPMCBuffer[int](128), 1, 8},
+		{BufferKindMPMC, newMPMCBuffer[int](128), 8, 1},
+		{BufferKindMPMC, newMPMCBuffer[int](128), 8, 8},
+	}
+
+	for _, tCase := range suite {
+		tName := fmt.Sprintf("%s-P%d-C%d", tCase.kind, tCase.prodNum, tCase.consNum)
+
+		t.Run(tName, func(t *testing.T) {
+			testBuffer(t, tCase.buffer, tCase.prodNum, tCase.consNum, items)
+		})
+	}
+}
+
+func testBuffer(t *testing.T, buffer buffer[int], prodNum, consNum, items int) {
+	assert := assert.New(t)
+
 	pushWg := &sync.WaitGroup{}
 	pushWg.Add(prodNum)
 
 	valueMap := &sync.Map{}
-	for val := range itemsCount {
+	for val := range items {
 		valueMap.Store(val, true)
 	}
 
-	itemsPerProducer := itemsCount / prodNum
+	var skippedPush atomic.Int64
+	var skippedPop atomic.Int64
+
+	itemsPerProducer := items / prodNum
 	for idx := range prodNum {
 		go func(idx int) {
 			defer pushWg.Done()
@@ -44,6 +66,7 @@ func testBuffer(assert *assert.Assertions, prodNum, consNum int, buffer buffer[i
 			produced := 0
 			for {
 				if !buffer.push(baseVal + produced) {
+					skippedPush.Add(1)
 					continue
 				}
 
@@ -60,7 +83,7 @@ func testBuffer(assert *assert.Assertions, prodNum, consNum int, buffer buffer[i
 
 	var totalConsumed atomic.Int64
 
-	itemsPerConsumer := itemsCount / consNum
+	itemsPerConsumer := items / consNum
 	for range consNum {
 		go func() {
 			defer popWg.Done()
@@ -69,6 +92,7 @@ func testBuffer(assert *assert.Assertions, prodNum, consNum int, buffer buffer[i
 			for {
 				val, ok := buffer.pop()
 				if !ok {
+					skippedPop.Add(1)
 					continue
 				}
 
@@ -84,27 +108,49 @@ func testBuffer(assert *assert.Assertions, prodNum, consNum int, buffer buffer[i
 	}
 
 	pushWg.Wait()
-	popWg.Wait()
+	t.Log("Producers done")
 
-	assert.Equal(int64(itemsCount), totalConsumed.Load())
+	popWg.Wait()
+	t.Log("Consumers done")
+
+	t.Logf("Total consumed items: %d", totalConsumed.Load())
+	t.Logf("Skipped push call: %d", skippedPush.Load())
+	t.Logf("Skipped pop call: %d", skippedPop.Load())
+
+	assert.Equal(int64(items), totalConsumed.Load())
 }
 
 func Test_RingBuffer(t *testing.T) {
-	kinds := []BufferKind{BufferKindSPSC}
-	capacity := 128
-	itemsPerConsumer := 1_000_000
+	const (
+		capacity     = 1024
+		itemsPerProd = 1_000_000
+	)
 
-	for _, kind := range kinds {
-		t.Run(kind.String(), func(t *testing.T) {
-			testRingBuffer(t, kind, capacity, 1, 1, itemsPerConsumer)
+	suite := []struct {
+		kind             BufferKind
+		capacity         int
+		prodNum, consNum int
+	}{
+		{BufferKindSPSC, capacity, 1, 1},
+		{BufferKindMPMC, capacity, 1, 1},
+		{BufferKindMPMC, capacity, 1, 4},
+		{BufferKindMPMC, capacity, 4, 1},
+		{BufferKindMPMC, capacity, 8, 8},
+	}
+
+	for _, tCase := range suite {
+		tName := fmt.Sprintf("%s-P%d-C%d", tCase.kind, tCase.prodNum, tCase.consNum)
+
+		t.Run(tName, func(t *testing.T) {
+			testRingBuffer(t, tCase.kind, tCase.capacity, tCase.prodNum, tCase.consNum, itemsPerProd)
 		})
 	}
 }
 
-func testRingBuffer(t *testing.T, kind BufferKind, capacity, numProducers, numConsumers, itemsPerProducer int) {
+func testRingBuffer(t *testing.T, kind BufferKind, capacity, prodNum, consNum, itemsPerProd int) {
 	assert := assert.New(t)
 
-	totalItems := numProducers * itemsPerProducer
+	totalItems := prodNum * itemsPerProd
 
 	rb := NewRingBuffer[int](uint32(capacity), kind)
 
@@ -120,8 +166,8 @@ func testRingBuffer(t *testing.T, kind BufferKind, capacity, numProducers, numCo
 	startTime := time.Now()
 
 	// Start consumers
-	consumerWg.Add(numConsumers)
-	for range numConsumers {
+	consumerWg.Add(consNum)
+	for range consNum {
 		go func() {
 			defer consumerWg.Done()
 
@@ -141,13 +187,13 @@ func testRingBuffer(t *testing.T, kind BufferKind, capacity, numProducers, numCo
 	}
 
 	// Start producers
-	producerWg.Add(numProducers)
-	for i := range numProducers {
+	producerWg.Add(prodNum)
+	for i := range prodNum {
 		go func(producerID int) {
 			defer producerWg.Done()
 
-			base := producerID * itemsPerProducer
-			for j := range itemsPerProducer {
+			base := producerID * itemsPerProd
+			for j := range itemsPerProd {
 				item := base + j
 				err := rb.Write(item)
 				assert.NoError(err)
@@ -157,6 +203,15 @@ func testRingBuffer(t *testing.T, kind BufferKind, capacity, numProducers, numCo
 			}
 		}(i)
 	}
+
+	// go func() {
+	// 	ticker := time.NewTicker(time.Second)
+	// 	defer ticker.Stop()
+
+	// 	for range ticker.C {
+	// 		t.Logf("Received %d items", receivedCount.Load())
+	// 	}
+	// }()
 
 	// Wait for all producers to finish
 	producerWg.Wait()
@@ -191,7 +246,7 @@ func testRingBuffer(t *testing.T, kind BufferKind, capacity, numProducers, numCo
 func Benchmark_RingBuffers(b *testing.B) {
 	b.ReportAllocs()
 
-	kinds := []BufferKind{BufferKindSPSC}
+	kinds := []BufferKind{BufferKindSPSC, BufferKindMPMC}
 	capacities := []int{512, 1024, 2048, 4096}
 	for _, kind := range kinds {
 		kindStr := kind.String()

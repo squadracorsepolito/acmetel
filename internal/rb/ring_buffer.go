@@ -1,3 +1,4 @@
+// Package rb provides a lock-free spsc/mpmc generic ring buffer.
 package rb
 
 import (
@@ -9,29 +10,42 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
+// ErrClosed is returned when the buffer is closed.
 var ErrClosed = errors.New("ring buffer: buffer is closed")
 
+// BufferKind is the type of the internal buffer implementation.
 type BufferKind uint8
 
 const (
+	//BufferKindSPSC is the single producer/single consumer ring buffer implementation.
 	BufferKindSPSC BufferKind = iota
+	//BufferKindMPMC is the multiple producer/multiple consumer ring buffer implementation.
+	BufferKindMPMC
 )
 
 func (bk BufferKind) String() string {
 	switch bk {
 	case BufferKindSPSC:
 		return "SPSC"
+	case BufferKindMPMC:
+		return "MPMC"
 	default:
 		return "unknown"
 	}
 }
 
+// RingBuffer is a lock-free spsc/mpmc generic ring buffer.
 type RingBuffer[T any] struct {
 	// kind is the type of the internal buffer
 	kind BufferKind
 
-	// spsc is the single producer/single consumer ring buffer
+	_ cpu.CacheLinePad
+
+	// spsc is the single producer/single consumer ring buffer implementation
 	spsc *spscBuffer[T]
+
+	// mpmc is the multiple producer/multiple consumer ring buffer implementation
+	mpmc *mpmcBuffer[T]
 
 	_ cpu.CacheLinePad
 
@@ -56,6 +70,7 @@ type RingBuffer[T any] struct {
 	mux      *sync.Mutex
 }
 
+// NewRingBuffer returns a new lock-free spsc/mpmc generic ring buffer.
 func NewRingBuffer[T any](capacity uint32, kind BufferKind) *RingBuffer[T] {
 	mux := &sync.Mutex{}
 
@@ -72,6 +87,8 @@ func NewRingBuffer[T any](capacity uint32, kind BufferKind) *RingBuffer[T] {
 	switch kind {
 	case BufferKindSPSC:
 		rb.spsc = newSPSCBuffer[T](parsedCapacity)
+	case BufferKindMPMC:
+		rb.mpmc = newMPMCBuffer[T](parsedCapacity)
 	}
 
 	return rb
@@ -81,6 +98,8 @@ func (rb *RingBuffer[T]) push(item T) bool {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.push(item)
+	case BufferKindMPMC:
+		return rb.mpmc.push(item)
 	default:
 		return false
 	}
@@ -90,6 +109,8 @@ func (rb *RingBuffer[T]) pop() (T, bool) {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.pop()
+	case BufferKindMPMC:
+		return rb.mpmc.pop()
 	default:
 		return *new(T), false
 	}
@@ -99,6 +120,8 @@ func (rb *RingBuffer[T]) len() uint32 {
 	switch rb.kind {
 	case BufferKindSPSC:
 		return rb.spsc.len()
+	case BufferKindMPMC:
+		return rb.mpmc.len()
 	default:
 		return 0
 	}
@@ -148,16 +171,11 @@ func (rb *RingBuffer[T]) Write(item T) error {
 	}
 
 cleanup:
-	// Check if buffer is marked as empty
-	if rb.isEmpty.Load() {
+	// Check if the buffer is marked as empty,
+	// if so, signal that the buffer is not empty
+	if rb.isEmpty.CompareAndSwap(true, false) {
 		rb.mux.Lock()
-
-		// Signal buffer as not empty to other goroutines
 		rb.notEmpty.Broadcast()
-
-		// Set buffer as not empty.
-		rb.isEmpty.Store(false)
-
 		rb.mux.Unlock()
 	}
 
@@ -213,26 +231,23 @@ func (rb *RingBuffer[T]) Read() (T, error) {
 	}
 
 cleanup:
-	// Check if buffer is marked as full
-	if rb.isFull.Load() {
+	// Check if buffer is marked as full,
+	// if so, signal buffer as not full
+	if rb.isFull.CompareAndSwap(true, false) {
 		rb.mux.Lock()
-
-		// Signal buffer as not full to other goroutines
 		rb.notFull.Broadcast()
-
-		// Set buffer as not full
-		rb.isFull.Store(false)
-
 		rb.mux.Unlock()
 	}
 
 	return item, nil
 }
 
+// Len returns the number of items in the buffer.
 func (rb *RingBuffer[T]) Len() uint32 {
 	return rb.len()
 }
 
+// Close closes the buffer.
 func (rb *RingBuffer[T]) Close() {
 	if !rb.isClosed.CompareAndSwap(false, true) {
 		return

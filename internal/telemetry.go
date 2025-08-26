@@ -10,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const providerName = "acmetel"
+
 type Telemetry struct {
 	stageKind string
 	stageName string
@@ -29,10 +31,10 @@ func NewTelemetry(stageKind, stageName string) *Telemetry {
 
 		l: NewLogger(stageKind, stageName),
 
-		tracer:          otel.GetTracerProvider().Tracer("acmetel"),
+		tracer:          otel.GetTracerProvider().Tracer(providerName),
 		tracePropagator: otel.GetTextMapPropagator(),
 
-		meter: otel.GetMeterProvider().Meter("acmetel"),
+		meter: otel.GetMeterProvider().Meter(providerName),
 	}
 }
 
