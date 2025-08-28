@@ -62,7 +62,7 @@ func (s *scaler) initMetrics() {
 
 func (s *scaler) init(ctx context.Context, initialWorkers int) {
 	for range s.cfg.maxWorkers {
-		s.stopChList = append(s.stopChList, make(chan struct{}))
+		s.stopChList = append(s.stopChList, make(chan struct{}, 1))
 	}
 
 	for range initialWorkers {
@@ -102,6 +102,7 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 	queueDepthPerWorker := float64(pendingTasks) / float64(currWorkers)
 
 	s.tel.LogInfo("auto-scaling metrics",
+		"current_workers", currWorkers,
 		"active_workers", activeWorkers,
 		"pending_tasks", pendingTasks,
 		"queue_depth_per_worker", queueDepthPerWorker,
@@ -180,6 +181,7 @@ func (s *scaler) sendStop(ctx context.Context, id int) {
 	select {
 	case <-ctx.Done():
 	case s.stopChList[id] <- struct{}{}:
+	default:
 	}
 }
 
@@ -216,7 +218,7 @@ func (s *scaler) stop() {
 
 func (s *scaler) notifyWorkerStart() int {
 	workerID := int(s.activeWorkers.Add(1)) - 1
-	return workerID
+	return min(workerID, s.cfg.maxWorkers-1)
 }
 
 func (s *scaler) notifyWorkerStop() {
@@ -232,6 +234,10 @@ func (s *scaler) notifyTaskCompleted() {
 }
 
 func (s *scaler) getStopCh(workerID int) <-chan struct{} {
+	if workerID >= s.cfg.maxWorkers {
+		return nil
+	}
+
 	return s.stopChList[workerID]
 }
 

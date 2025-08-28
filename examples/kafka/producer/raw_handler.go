@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/squadracorsepolito/acmetel/egress"
-	"github.com/squadracorsepolito/acmetel/ticker"
+	"github.com/squadracorsepolito/acmetel/ingress"
 )
 
 type rawHandler struct{}
@@ -14,8 +14,8 @@ func (h *rawHandler) Init(_ context.Context) error {
 	return nil
 }
 
-func (h *rawHandler) Handle(_ context.Context, tickerMsg *ticker.Message, kafkaMsg *egress.KafkaMessage) error {
-	tick := tickerMsg.TriggerNumber
+func (h *rawHandler) Handle(_ context.Context, tickerMsg *ingress.TickerMessage, kafkaMsg *egress.KafkaMessage) error {
+	tick := tickerMsg.TickNumber
 	strTick := strconv.Itoa(tick)
 
 	kafkaMsg.Topic = "example-topic"

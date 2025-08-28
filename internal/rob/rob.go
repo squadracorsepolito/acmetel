@@ -3,6 +3,8 @@ package rob
 
 import (
 	"errors"
+
+	"github.com/squadracorsepolito/acmetel/connector"
 )
 
 var (
@@ -12,6 +14,21 @@ var (
 	ErrSeqNumDuplicated = errors.New("sequence number duplicated")
 	// ErrSeqNumTooBig is returned when the sequence number is too big.
 	ErrSeqNumTooBig = errors.New("sequence number too big")
+)
+
+// EnqueueStatus is the status of the enqueue operation.
+type EnqueueStatus uint8
+
+const (
+	// EnqueueStatusInOrder is returned when the item is in order,
+	// so there is no need to enqueue it.
+	EnqueueStatusInOrder EnqueueStatus = iota
+	// EnqueueStatusPrimary is returned when the item is enqueued into the primary buffer.
+	EnqueueStatusPrimary
+	// EnqueueStatusAuxiliary is returned when the item is enqueued into the auxiliary buffer.
+	EnqueueStatusAuxiliary
+	// EnqueueStatusErr is returned when the item cannot be enqueued.
+	EnqueueStatusErr
 )
 
 // Config is the configuration for the re-order buffer structure [ROB].
@@ -52,7 +69,9 @@ type robItem interface {
 // It uses the EMA (exponential moving average) technique to smooth and adjust
 // the time associated with an item.
 type ROB[T robItem] struct {
-	outputCh chan T
+	//outputCh chan T
+
+	outputConnector connector.Connector[T]
 
 	primaryBuf   *buffer[T]
 	auxiliaryBuf *buffer[T]
@@ -65,9 +84,11 @@ type ROB[T robItem] struct {
 }
 
 // NewROB returns a new [ROB] (re-order buffer) with the given configuration.
-func NewROB[T robItem](cfg *Config) *ROB[T] {
+func NewROB[T robItem](outputConnector connector.Connector[T], cfg *Config) *ROB[T] {
 	return &ROB[T]{
-		outputCh: make(chan T, cfg.OutputChannelSize),
+		// outputCh: make(chan T, cfg.OutputChannelSize),
+
+		outputConnector: outputConnector,
 
 		primaryBuf:   newBuffer[T](cfg.PrimaryBufferSize, 0, cfg.MaxSeqNum),
 		auxiliaryBuf: newBuffer[T](cfg.AuxiliaryBufferSize, cfg.PrimaryBufferSize, cfg.MaxSeqNum),
@@ -95,17 +116,17 @@ func (rob *ROB[T]) tryDequeueFromPrimary() {
 	rob.auxiliaryBuf.transfer(rob.primaryBuf, deqItemCount)
 }
 
-func (rob *ROB[T]) enqueuePrimary(item T) error {
+func (rob *ROB[T]) enqueuePrimary(item T) (EnqueueStatus, error) {
 	seqNum := item.GetSequenceNumber()
 
 	// Check if the sequence number is out of the window
 	if !rob.primaryBuf.isInRange(seqNum) {
-		return ErrSeqNumOutOfWindow
+		return EnqueueStatusErr, ErrSeqNumOutOfWindow
 	}
 
 	// Check if the sequence number is duplicated
 	if rob.primaryBuf.isDuplicated(seqNum) {
-		return ErrSeqNumDuplicated
+		return EnqueueStatusErr, ErrSeqNumDuplicated
 	}
 
 	// Enqueue the item with the skip flag
@@ -115,7 +136,7 @@ func (rob *ROB[T]) enqueuePrimary(item T) error {
 		// of the auxiliary buffer into the primary
 		rob.auxiliaryBuf.transfer(rob.primaryBuf, 1)
 		rob.deliver(item)
-		return nil
+		return EnqueueStatusInOrder, nil
 	}
 
 	// Dequeue and deliver consecutive items
@@ -136,7 +157,7 @@ func (rob *ROB[T]) enqueuePrimary(item T) error {
 		rob.tryDequeueFromPrimary()
 	}
 
-	return nil
+	return EnqueueStatusPrimary, nil
 }
 
 func (rob *ROB[T]) enqueueAuxiliary(item T) error {
@@ -176,7 +197,8 @@ func (rob *ROB[T]) enqueueAuxiliary(item T) error {
 
 func (rob *ROB[T]) deliver(item T) {
 	rob.timeSmoother.adjust(item)
-	rob.outputCh <- item
+	// rob.outputCh <- item
+	rob.outputConnector.Write(item)
 }
 
 // Enqueue tries to add the item into the ROB.
@@ -188,11 +210,11 @@ func (rob *ROB[T]) deliver(item T) {
 //     for both the buffers
 //   - [ErrSeqNumDuplicated] if the sequence number is duplicated
 //   - [ErrSeqNumTooBig] if the sequence number is too big
-func (rob *ROB[T]) Enqueue(item T) error {
+func (rob *ROB[T]) Enqueue(item T) (EnqueueStatus, error) {
 	seqNum := item.GetSequenceNumber()
 
 	if !rob.primaryBuf.isValidSize(seqNum) {
-		return ErrSeqNumTooBig
+		return EnqueueStatusErr, ErrSeqNumTooBig
 	}
 
 	if !rob.isInitialized {
@@ -204,22 +226,23 @@ func (rob *ROB[T]) Enqueue(item T) error {
 		rob.isInitialized = true
 	}
 
-	err := rob.enqueuePrimary(item)
+	status, err := rob.enqueuePrimary(item)
 	if err == nil {
-		return nil
+		return status, nil
 	}
 
 	if errors.Is(err, ErrSeqNumDuplicated) {
-		return err
+		return EnqueueStatusErr, err
 	}
 
-	return rob.enqueueAuxiliary(item)
+	err = rob.enqueueAuxiliary(item)
+	return EnqueueStatusAuxiliary, err
 }
 
-// GetOutputCh returns the output channel of the re-order buffer.
-func (rob *ROB[T]) GetOutputCh() chan T {
-	return rob.outputCh
-}
+// // GetOutputCh returns the output channel of the re-order buffer.
+// func (rob *ROB[T]) GetOutputCh() chan T {
+// 	return rob.outputCh
+// }
 
 func (rob *ROB[T]) reset() {
 	rob.primaryBuf.reset()

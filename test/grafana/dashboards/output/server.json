@@ -362,13 +362,108 @@
             "type": "datasource",
             "uid": "-- Mixed --"
          },
+         "fieldConfig": {
+            "defaults": {
+               "color": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 24
+         },
+         "id": 9,
+         "options": {
+            "colorMode": "background_solid",
+            "graphMode": "none",
+            "showPercentChange": false
+         },
+         "pluginVersion": "v11.4.0",
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "ordered_messages_total",
+               "interval": "15s",
+               "legendFormat": "ordered_messages"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "primary_enqueued_messages_total",
+               "interval": "15s",
+               "legendFormat": "primary_enqueued_messages"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "auxiliary_enqueued_messages_total",
+               "interval": "15s",
+               "legendFormat": "auxiliary_enqueued_messages"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "out_of_order_sequence_number_total",
+               "interval": "15s",
+               "legendFormat": "out_of_order_sequence_number"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "duplicated_sequence_number_total",
+               "interval": "15s",
+               "legendFormat": "duplicated_sequence_number"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "invalid_sequence_number_total",
+               "interval": "15s",
+               "legendFormat": "invalid_sequence_number"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$metrics"
+               },
+               "expr": "resets_total",
+               "interval": "15s",
+               "legendFormat": "resets"
+            }
+         ],
+         "title": "ROB Stage",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "datasource",
+            "uid": "-- Mixed --"
+         },
          "gridPos": {
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 26
+            "y": 32
          },
-         "id": 9,
+         "id": 10,
          "pluginVersion": "v11.4.0",
          "targets": [
             {

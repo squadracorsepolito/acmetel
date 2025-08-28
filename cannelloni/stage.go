@@ -9,17 +9,27 @@ import (
 )
 
 type Stage[T message.Serializable] struct {
-	*stage.HandlerWithROB[T, *Message, worker[T], any, *worker[T]]
+	// *stage.HandlerWithROB[T, *Message, worker[T], any, *worker[T]]
+
+	*stage.Handler[T, *Message, worker[T], any, *worker[T]]
 }
 
 func NewStage[T message.Serializable](inputConnector connector.Connector[T], outputConnector connector.Connector[*Message], cfg *Config) *Stage[T] {
+	// return &Stage[T]{
+	// 	HandlerWithROB: stage.NewHandlerWithROB[T, *Message, worker[T], any](
+	// 		"cannelloni", inputConnector, outputConnector, cfg.PoolConfig, cfg.ROBConfig, cfg.ROBTimeout,
+	// 	),
+	// }
+
 	return &Stage[T]{
-		HandlerWithROB: stage.NewHandlerWithROB[T, *Message, worker[T], any](
-			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig, cfg.ROBConfig, cfg.ROBTimeout,
+		Handler: stage.NewHandler[T, *Message, worker[T], any](
+			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig,
 		),
 	}
 }
 
 func (s *Stage[T]) Init(ctx context.Context) error {
-	return s.HandlerWithROB.Init(ctx, nil)
+	// return s.HandlerWithROB.Init(ctx, nil)
+
+	return s.Handler.Init(ctx, nil)
 }

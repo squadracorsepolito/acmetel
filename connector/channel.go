@@ -1,6 +1,9 @@
 package connector
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // Channel implements a [Connector] using a channel.
 type Channel[T any] struct {
@@ -83,3 +86,5 @@ func (c *Channel[T]) Read() (T, error) {
 func (c *Channel[T]) Close() {
 	c.closed.Store(true)
 }
+
+func (c *Channel[T]) SetReadTimeout(_ time.Duration) {}

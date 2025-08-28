@@ -6,12 +6,16 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sys/cpu"
 )
 
 // ErrClosed is returned when the buffer is closed.
 var ErrClosed = errors.New("ring buffer: buffer is closed")
+
+// ErrReadTimeout is returned when the buffer is empty and the read operation times out.
+var ErrReadTimeout = errors.New("ring buffer: read timeout")
 
 // BufferKind is the type of the internal buffer implementation.
 type BufferKind uint8
@@ -68,6 +72,8 @@ type RingBuffer[T any] struct {
 	notEmpty *sync.Cond
 	notFull  *sync.Cond
 	mux      *sync.Mutex
+
+	readTimeout time.Duration
 }
 
 // NewRingBuffer returns a new lock-free spsc/mpmc generic ring buffer.
@@ -80,6 +86,8 @@ func NewRingBuffer[T any](capacity uint32, kind BufferKind) *RingBuffer[T] {
 		mux:      mux,
 		notEmpty: sync.NewCond(mux),
 		notFull:  sync.NewCond(mux),
+
+		readTimeout: 3 * time.Second,
 	}
 
 	parsedCapacity := roundToPowerOf2(capacity)
@@ -124,6 +132,35 @@ func (rb *RingBuffer[T]) len() uint32 {
 		return rb.mpmc.len()
 	default:
 		return 0
+	}
+}
+
+// SetReadTimeout sets the read timeout.
+// It must be called before the buffer is used.
+func (rb *RingBuffer[T]) SetReadTimeout(readTimeout time.Duration) {
+	rb.readTimeout = readTimeout
+}
+
+func (rb *RingBuffer[T]) wait(cond *sync.Cond) error {
+	timer := time.NewTimer(rb.readTimeout)
+	defer timer.Stop()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		cond.Wait()
+	}()
+
+	select {
+	case <-done:
+		return nil
+
+	case <-timer.C:
+		// Wake up the waiting goroutine
+		cond.Broadcast()
+		<-done
+		return ErrReadTimeout
 	}
 }
 
@@ -223,8 +260,11 @@ func (rb *RingBuffer[T]) Read() (T, error) {
 			return item, ErrClosed
 		}
 
-		// Wait for data
-		rb.notEmpty.Wait()
+		// Wait for data, return an error if the timeout is reached
+		if err := rb.wait(rb.notEmpty); err != nil {
+			rb.mux.Unlock()
+			return item, err
+		}
 
 		// Someone signaled the buffer as not empty
 		rb.mux.Unlock()

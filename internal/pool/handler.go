@@ -11,8 +11,6 @@ import (
 
 // Handler is a worker pool intended to be used by an handler stage.
 type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
-	*withOutput[Out]
-
 	tel *internal.Telemetry
 
 	cfg *Config
@@ -23,7 +21,8 @@ type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, 
 
 	wg *sync.WaitGroup
 
-	inputCh chan In
+	fanOut *fanOut[In]
+	fanIn  *fanIn[Out]
 
 	handledMessages atomic.Int64
 	handlingErrors  atomic.Int64
@@ -31,11 +30,7 @@ type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, 
 
 // NewHandler returns a new handler worker pool.
 func NewHandler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
-	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
-
 	return &Handler[W, InitArgs, In, Out, WPtr]{
-		withOutput: newWithOutput[Out](channelSize),
-
 		tel: tel,
 
 		cfg: cfg,
@@ -44,7 +39,8 @@ func NewHandler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[
 
 		wg: &sync.WaitGroup{},
 
-		inputCh: make(chan In, channelSize),
+		fanOut: newFanOut[In](cfg.InputQueueSize),
+		fanIn:  newFanIn[Out](cfg.OutputQueueSize),
 	}
 }
 
@@ -110,6 +106,9 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	}()
 
 	stopCh := p.scaler.getStopCh(workerID)
+	if stopCh == nil {
+		return
+	}
 
 	for {
 		select {
@@ -119,7 +118,12 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 		case <-stopCh:
 			return
 
-		case msgIn := <-p.inputCh:
+		default:
+			msgIn, err := p.fanOut.readTask()
+			if err != nil {
+				continue
+			}
+
 			msgOut, err := worker.Handle(ctx, msgIn)
 			if err != nil {
 				p.tel.LogError("failed to do work", err, "worker_id", workerID)
@@ -130,7 +134,9 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 
 			p.handledMessages.Add(1)
 
-			p.sendOutput(msgOut)
+			if err := p.fanIn.addTask(msgOut); err != nil {
+				continue
+			}
 
 		loopCleanup:
 			p.scaler.notifyTaskCompleted()
@@ -142,25 +148,26 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 func (p *Handler[W, InitArgs, In, Out, WPtr]) Close() {
 	p.tel.LogInfo("closing worker pool")
 
+	p.fanOut.close()
+
 	p.wg.Wait()
 	p.scaler.stop()
 
-	close(p.inputCh)
-
-	p.closeOutput()
+	p.fanIn.close()
 }
 
-// AddTask adds a new task to the worker pool.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) AddTask(ctx context.Context, task In) bool {
-	select {
-	case <-ctx.Done():
-		return false
-
-	case p.inputCh <- task:
-		p.scaler.notifyTaskAdded()
-		return true
-
-	default:
-		return false
+// AddMessage adds a new task to the worker pool queue.
+func (p *Handler[W, InitArgs, In, Out, WPtr]) AddMessage(ctx context.Context, msgIn In) error {
+	if err := p.fanOut.addTask(ctx, msgIn); err != nil {
+		return err
 	}
+
+	p.scaler.notifyTaskAdded()
+
+	return nil
+}
+
+// ExtractMessage extracts a message from the worker pool output queue.
+func (p *Handler[W, InitArgs, In, Out, WPtr]) ExtractMessage() (Out, error) {
+	return p.fanIn.readTask()
 }

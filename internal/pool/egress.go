@@ -23,7 +23,7 @@ type Egress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArg
 
 	wg *sync.WaitGroup
 
-	inputCh chan In
+	fanOut *fanOut[In]
 
 	deliveredMessages   atomic.Int64
 	deliveringErrors    atomic.Int64
@@ -32,8 +32,6 @@ type Egress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArg
 
 // NewEgress returns a new egress worker pool.
 func NewEgress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, InitArgs, In]](tel *internal.Telemetry, cfg *Config) *Egress[In, W, InitArgs, WPtr] {
-	channelSize := cfg.MaxWorkers * cfg.QueueDepthPerWorker * 8 * 32
-
 	return &Egress[In, W, InitArgs, WPtr]{
 		tel: tel,
 
@@ -43,7 +41,7 @@ func NewEgress[In message.Message, W, InitArgs any, WPtr EgressWorkerPtr[W, Init
 
 		wg: &sync.WaitGroup{},
 
-		inputCh: make(chan In, channelSize),
+		fanOut: newFanOut[In](cfg.InputQueueSize),
 	}
 }
 
@@ -112,6 +110,9 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 	}()
 
 	stopCh := ep.scaler.getStopCh(workerID)
+	if stopCh == nil {
+		return
+	}
 
 	for {
 		select {
@@ -121,7 +122,12 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 		case <-stopCh:
 			return
 
-		case msgIn := <-ep.inputCh:
+		default:
+			msgIn, err := ep.fanOut.readTask()
+			if err != nil {
+				continue
+			}
+
 			if err := worker.Deliver(ctx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)
 				ep.deliveringErrors.Add(1)
@@ -143,23 +149,19 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 func (ep *Egress[In, W, InitArgs, WPtr]) Close() {
 	ep.tel.LogInfo("stopping worker pool")
 
+	ep.fanOut.close()
+
 	ep.wg.Wait()
 	ep.scaler.stop()
-
-	close(ep.inputCh)
 }
 
-// AddTask adds a new task to the worker pool.
-func (ep *Egress[In, W, InitArgs, WPtr]) AddTask(ctx context.Context, task In) bool {
-	select {
-	case <-ctx.Done():
-		return false
-
-	case ep.inputCh <- task:
-		ep.scaler.notifyTaskAdded()
-		return true
-
-	default:
-		return false
+// AddMessage adds a new message to the worker pool queue.
+func (ep *Egress[In, W, InitArgs, WPtr]) AddMessage(ctx context.Context, msgIn In) error {
+	if err := ep.fanOut.addTask(ctx, msgIn); err != nil {
+		return err
 	}
+
+	ep.scaler.notifyTaskAdded()
+
+	return nil
 }

@@ -226,6 +226,8 @@ func newKafkaMessage() *KafkaMessage {
 //  SOURCE  //
 //////////////
 
+var _ stage.Source[*KafkaMessage] = (*kafkaSource)(nil)
+
 type kafkaSource struct {
 	tel *internal.Telemetry
 

@@ -53,6 +53,16 @@ g.dashboard.new('Acmetel Sever')
         prometheus.counter('worker_pool_active_workers', '{{acmetel_stage_kind}} - {{acmetel_stage_name}}')
       ),
 
+      p.stat.base('ROB Stage', [
+        prometheus.counter('ordered_messages_total', 'ordered_messages'),
+        prometheus.counter('primary_enqueued_messages_total', 'primary_enqueued_messages'),
+        prometheus.counter('auxiliary_enqueued_messages_total', 'auxiliary_enqueued_messages'),
+        prometheus.counter('out_of_order_sequence_number_total', 'out_of_order_sequence_number'),
+        prometheus.counter('duplicated_sequence_number_total', 'duplicated_sequence_number'),
+        prometheus.counter('invalid_sequence_number_total', 'invalid_sequence_number'),
+        prometheus.counter('resets_total', 'resets'),
+      ], w=24),
+
       p.table.base('Traces', tempo.duration('sc-test-telemetry', '100ms')),
     ],
   ),

@@ -13,6 +13,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/can"
 	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/processor"
 	"github.com/squadracorsepolito/acmetel/questdb"
 	"github.com/squadracorsepolito/acmetel/raw"
 	"github.com/squadracorsepolito/acmetel/udp"
@@ -47,7 +48,10 @@ func main() {
 	otel.SetMeterProvider(meterProvider)
 
 	udpToCannelloni := connector.NewRingBuffer[*udp.Message](connectorSize)
-	cannelloniToCAN := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
+	cannelloniToROB := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
+
+	robToCAN := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
+
 	canToRaw := connector.NewRingBuffer[*can.Message](connectorSize)
 	rawToQuestDB := connector.NewRingBuffer[*questdb.Message](connectorSize)
 
@@ -55,26 +59,28 @@ func main() {
 	udpStage := udp.NewStage(udpToCannelloni, udpCfg)
 
 	cannelloniCfg := cannelloni.NewDefaultConfig()
-	cannelloniStage := cannelloni.NewStage(udpToCannelloni, cannelloniToCAN, cannelloniCfg)
+	cannelloniStage := cannelloni.NewStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
+
+	robCfg := processor.DefaultROBConfig()
+	robStage := processor.NewROBStage(cannelloniToROB, robToCAN, robCfg)
 
 	canCfg := can.NewDefaultConfig()
 	canCfg.Messages = getMessages()
-	canStage := can.NewStage(cannelloniToCAN, canToRaw, canCfg)
+	canStage := can.NewStage(robToCAN, canToRaw, canCfg)
 
 	rawCfg := raw.NewDefaultConfig()
+	rawCfg.PoolConfig.MinWorkers = rawCfg.PoolConfig.InitialWorkers
 	rawStage := raw.NewStage("can_to_questdb", newRawHandler(), canToRaw, rawToQuestDB, rawCfg)
 
 	questDBCfg := questdb.NewDefaultConfig()
-	questDBCfg.PoolConfig.MaxWorkers = 32
-	questDBCfg.PoolConfig.InitialWorkers = 8
-	questDBCfg.PoolConfig.MinWorkers = 8
-	questDBCfg.PoolConfig.QueueDepthPerWorker = 1
+	questDBCfg.PoolConfig.MinWorkers = questDBCfg.PoolConfig.InitialWorkers
 	questDBStage := questdb.NewStage(rawToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(udpStage)
 	pipeline.AddStage(cannelloniStage)
+	pipeline.AddStage(robStage)
 	pipeline.AddStage(canStage)
 	pipeline.AddStage(rawStage)
 	pipeline.AddStage(questDBStage)

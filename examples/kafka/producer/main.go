@@ -11,8 +11,8 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/examples/telemetry"
+	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/raw"
-	"github.com/squadracorsepolito/acmetel/ticker"
 )
 
 const connectorSize = 4096
@@ -23,12 +23,12 @@ func main() {
 
 	telemetry.Init(ctx, "kafka-example")
 
-	tickerToRaw := connector.NewRingBuffer[*ticker.Message](connectorSize)
+	tickerToRaw := connector.NewRingBuffer[*ingress.TickerMessage](connectorSize)
 	rawToKafka := connector.NewRingBuffer[*egress.KafkaMessage](connectorSize)
 
-	tickerCfg := ticker.NewDefaultConfig()
+	tickerCfg := ingress.DefaultTickerConfig()
 	tickerCfg.Interval = time.Second
-	tickerStage := ticker.NewStage(tickerToRaw, tickerCfg)
+	tickerStage := ingress.NewTickerStage(tickerToRaw, tickerCfg)
 
 	rawCfg := raw.NewDefaultConfig()
 	rawStage := raw.NewStage("ticker_to_kafka", &rawHandler{}, tickerToRaw, rawToKafka, rawCfg)

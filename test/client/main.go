@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	udpPackets = 100_000
-
-	// max 113
-	messagesPerPacket = 50
+	cycles            = 3
+	udpPackets        = 100_000
+	messagesPerPacket = 50 // max 113
 )
 
 func main() {
@@ -43,24 +42,30 @@ func main() {
 	}
 
 	packetSize := len(packets[0])
-	log.Print("packet size: ", packetSize)
+	log.Printf("cycles: %d; packets: %d; messages per packet: %d; packet size: %d",
+		cycles, udpPackets, messagesPerPacket, packetSize)
 
-	t1 := time.Now()
+	for c := range cycles {
+		t1 := time.Now()
 
-	for i, data := range packets {
-		_, err = conn.Write(data)
-		if err != nil {
-			panic(err)
+		for i, data := range packets {
+			_, err = conn.Write(data)
+			if err != nil {
+				panic(err)
+			}
+
+			if i%10 == 0 {
+				time.Sleep(time.Millisecond * 10)
+			}
 		}
 
-		if i%10 == 0 {
-			time.Sleep(time.Millisecond * 10)
-		}
+		t2 := time.Now()
+
+		packetsPerSec := float64(udpPackets) / t2.Sub(t1).Seconds()
+
+		log.Printf("cycle %d: packets per sec: %f", c, packetsPerSec)
+		log.Printf("cycle %d: bytes per sec: %f", c, packetsPerSec*float64(packetSize))
+
+		time.Sleep(time.Second)
 	}
-
-	t2 := time.Now()
-
-	packetsPerSec := float64(udpPackets) / t2.Sub(t1).Seconds()
-	log.Print("packets per sec: ", packetsPerSec)
-	log.Print("bytes per sec: ", packetsPerSec*float64(packetSize))
 }
