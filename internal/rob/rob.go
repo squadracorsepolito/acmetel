@@ -33,9 +33,6 @@ const (
 
 // Config is the configuration for the re-order buffer structure [ROB].
 type Config struct {
-	// OutputChannelSize is the size of the output channel.
-	OutputChannelSize int
-
 	// MaxSeqNum is the maximum possible sequence number.
 	MaxSeqNum uint64
 
@@ -69,8 +66,6 @@ type robItem interface {
 // It uses the EMA (exponential moving average) technique to smooth and adjust
 // the time associated with an item.
 type ROB[T robItem] struct {
-	//outputCh chan T
-
 	outputConnector connector.Connector[T]
 
 	primaryBuf   *buffer[T]
@@ -86,8 +81,6 @@ type ROB[T robItem] struct {
 // NewROB returns a new [ROB] (re-order buffer) with the given configuration.
 func NewROB[T robItem](outputConnector connector.Connector[T], cfg *Config) *ROB[T] {
 	return &ROB[T]{
-		// outputCh: make(chan T, cfg.OutputChannelSize),
-
 		outputConnector: outputConnector,
 
 		primaryBuf:   newBuffer[T](cfg.PrimaryBufferSize, 0, cfg.MaxSeqNum),
@@ -197,12 +190,11 @@ func (rob *ROB[T]) enqueueAuxiliary(item T) error {
 
 func (rob *ROB[T]) deliver(item T) {
 	rob.timeSmoother.adjust(item)
-	// rob.outputCh <- item
 	rob.outputConnector.Write(item)
 }
 
-// Enqueue tries to add the item into the ROB.
-// If the item is in sequence, it sends it to the output channel.
+// Enqueue tries to add the item into the ROB and returns the status.
+// If the item is in sequence, it sends it to the output connector.
 // Otherwise, it tries to add the item into the primary or the auxiliary buffer.
 //
 // It returns:
@@ -238,11 +230,6 @@ func (rob *ROB[T]) Enqueue(item T) (EnqueueStatus, error) {
 	err = rob.enqueueAuxiliary(item)
 	return EnqueueStatusAuxiliary, err
 }
-
-// // GetOutputCh returns the output channel of the re-order buffer.
-// func (rob *ROB[T]) GetOutputCh() chan T {
-// 	return rob.outputCh
-// }
 
 func (rob *ROB[T]) reset() {
 	rob.primaryBuf.reset()

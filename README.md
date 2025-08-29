@@ -143,9 +143,9 @@ func main() {
 }
 ```
 
-### Handler Stage
+### Processor Stage
 
-An handler stage is used to convert/process an input message into an output message. For this reason, an handler stage has an **Input Connector** and an **Output Connector**.
+A processor stage is used to convert/process an input message into an output message. For this reason, an processor stage has an **Input Connector** and an **Output Connector**.
 
 #### Cannelloni
 

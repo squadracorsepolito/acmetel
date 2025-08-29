@@ -12,6 +12,19 @@ type worker[InitArgs any] interface {
 	SetTelemetry(tel *internal.Telemetry)
 }
 
+// ProcessorWorker is the interface for a processor worker.
+type ProcessorWorker[InitArgs, In, Out any] interface {
+	worker[InitArgs]
+
+	Handle(ctx context.Context, task In) (Out, error)
+}
+
+// ProcessorWorkerPtr is an utility type for the processor worker.
+type ProcessorWorkerPtr[W, InitArgs, In, Out any] interface {
+	*W
+	ProcessorWorker[InitArgs, In, Out]
+}
+
 // EgressWorker is the interface for an egress worker.
 type EgressWorker[InitArgs, In any] interface {
 	worker[InitArgs]
@@ -25,49 +38,12 @@ type EgressWorkerPtr[W, InitArgs, In any] interface {
 	EgressWorker[InitArgs, In]
 }
 
-// HandlerWorker is the interface for a handler worker.
-type HandlerWorker[InitArgs, In, Out any] interface {
-	worker[InitArgs]
-
-	Handle(ctx context.Context, task In) (Out, error)
-}
-
-// HandlerWorkerPtr is an utility type for the handler worker.
-type HandlerWorkerPtr[W, InitArgs, In, Out any] interface {
-	*W
-	HandlerWorker[InitArgs, In, Out]
-}
-
-// IngressWorker is the interface for an ingress worker.
-type IngressWorker[InitArgs, Out any] interface {
-	worker[InitArgs]
-
-	Receive(ctx context.Context) (Out, bool, error)
-}
-
-// IngressWorkerPtr is an utility type for the ingress worker.
-type IngressWorkerPtr[W, InitArgs, Out any] interface {
-	*W
-	IngressWorker[InitArgs, Out]
-}
-
-// IngressWorker is the interface for an ingress worker.
-type IngressWorker2[WArgs, In, Out any] interface {
-	worker[WArgs]
-
-	Receive2(ctx context.Context, task In) (Out, error)
-}
-
-// IngressWorkerPtr is an utility type for the ingress worker.
-type IngressWorkerPtr2[W, WArgs, In, Out any] interface {
-	*W
-	IngressWorker2[WArgs, In, Out]
-}
-
+// BaseWorker is the base struct for a worker that can be embedded.
 type BaseWorker struct {
 	Tel *internal.Telemetry
 }
 
+// SetTelemetry sets the telemetry for the worker.
 func (w *BaseWorker) SetTelemetry(tel *internal.Telemetry) {
 	w.Tel = tel
 }

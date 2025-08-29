@@ -11,10 +11,10 @@ import (
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/examples/telemetry"
 	"github.com/squadracorsepolito/acmetel/ingress"
-	"github.com/squadracorsepolito/acmetel/raw"
+	"github.com/squadracorsepolito/acmetel/processor"
 )
 
-const connectorSize = 4096
+const connectorSize = 2048
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -23,21 +23,22 @@ func main() {
 	telemetry.Init(ctx, "kafka-example")
 
 	kafkaToRaw := connector.NewRingBuffer[*ingress.KafkaMessage](connectorSize)
-	rawToKafka := connector.NewRingBuffer[*egress.KafkaMessage](connectorSize)
+	customToKafka := connector.NewRingBuffer[*egress.KafkaMessage](connectorSize)
 
 	kafkaIngressCfg := ingress.DefaultKafkaConfig("example-topic")
 	kafkaIngressStage := ingress.NewKafkaStage(kafkaToRaw, kafkaIngressCfg)
 
-	rawCfg := raw.NewDefaultConfig()
-	rawStage := raw.NewStage("ingress_to_egress", &rawHandler{}, kafkaToRaw, rawToKafka, rawCfg)
+	customCfg := processor.DefaultCustomConfig()
+	customCfg.Name = "ingress_to_egress"
+	customStage := processor.NewCustomStage(newIngressToEgressHandler(), kafkaToRaw, customToKafka, customCfg)
 
 	kafkaEgressCfg := egress.DefaultKafkaConfig()
-	kafkaEgressStage := egress.NewKafkaStage(rawToKafka, kafkaEgressCfg)
+	kafkaEgressStage := egress.NewKafkaStage(customToKafka, kafkaEgressCfg)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(kafkaIngressStage)
-	pipeline.AddStage(rawStage)
+	pipeline.AddStage(customStage)
 	pipeline.AddStage(kafkaEgressStage)
 
 	if err := pipeline.Init(ctx); err != nil {

@@ -16,10 +16,10 @@ func (fi *fanIn[T]) addTask(task T) error {
 	return fi.buffer.Write(task)
 }
 
-func (fo *fanIn[T]) readTask() (T, error) {
-	return fo.buffer.Read()
+func (fi *fanIn[T]) readTask() (T, error) {
+	return fi.buffer.Read()
 }
 
-func (fo *fanIn[T]) close() {
-	fo.buffer.Close()
+func (fi *fanIn[T]) close() {
+	fi.buffer.Close()
 }

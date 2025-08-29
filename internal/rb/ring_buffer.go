@@ -73,6 +73,8 @@ type RingBuffer[T any] struct {
 	notFull  *sync.Cond
 	mux      *sync.Mutex
 
+	// readTimeout the maximum amount of time to wait the buffer is not empty
+	// before while reading
 	readTimeout time.Duration
 }
 
@@ -136,7 +138,7 @@ func (rb *RingBuffer[T]) len() uint32 {
 }
 
 // SetReadTimeout sets the read timeout.
-// It must be called before the buffer is used.
+// It must be used before calling the Write/Read methods.
 func (rb *RingBuffer[T]) SetReadTimeout(readTimeout time.Duration) {
 	rb.readTimeout = readTimeout
 }

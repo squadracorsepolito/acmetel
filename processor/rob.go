@@ -17,24 +17,53 @@ import (
 //////////////
 
 type ROBConfig struct {
-	ROB *rob.Config
+	// MaxSeqNum is the maximum possible sequence number.
+	//
+	// Default: 255
+	MaxSeqNum uint64
 
+	// PrimaryBufferSize is the size of the primary buffer.
+	//
+	// Default: 128
+	PrimaryBufferSize uint64
+
+	// AuxiliaryBufferSize is the size of the auxiliary buffer.
+	//
+	// Default: 128
+	AuxiliaryBufferSize uint64
+
+	// FlushTreshold is the value of the fullness of the auxiliary buffer
+	// needed for flushing the primary buffer.
+	//
+	// Default: 0.3
+	FlushTreshold float64
+
+	// BaseAlpha is the base value for the alpha parameter for the EMA.
+	//
+	// Default: 0.2
+	BaseAlpha float64
+
+	// JumpThreshold is the threshold used by the time smoother (EMA)
+	// for adjusting the alpha parameter when there is a jump in the sequence.
+	//
+	// Default: 8
+	JumpThreshold uint64
+
+	// ResetTimeout is the timeout for resetting the re-order buffer.
+	//
+	// Default: 100ms
 	ResetTimeout time.Duration
 }
 
 func DefaultROBConfig() *ROBConfig {
 	return &ROBConfig{
-		ROB: &rob.Config{
-			OutputChannelSize:   256,
-			MaxSeqNum:           255,
-			PrimaryBufferSize:   128,
-			AuxiliaryBufferSize: 128,
-			FlushTreshold:       0.3,
-			BaseAlpha:           0.2,
-			JumpThreshold:       8,
-		},
-
-		ResetTimeout: 50 * time.Millisecond,
+		MaxSeqNum:           255,
+		PrimaryBufferSize:   128,
+		AuxiliaryBufferSize: 128,
+		FlushTreshold:       0.3,
+		BaseAlpha:           0.2,
+		JumpThreshold:       8,
+		ResetTimeout:        100 * time.Millisecond,
 	}
 }
 
@@ -67,8 +96,6 @@ type ROBStage[T message.ReOrderable] struct {
 func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outConnector connector.Connector[T], cfg *ROBConfig) *ROBStage[T] {
 	tel := internal.NewTelemetry("processor", "rob")
 
-	inConnector.SetReadTimeout(cfg.ResetTimeout)
-
 	return &ROBStage[T]{
 		tel: tel,
 
@@ -76,14 +103,24 @@ func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outC
 
 		inputConnector:  inConnector,
 		outputConnector: outConnector,
-
-		rob: rob.NewROB(outConnector, cfg.ROB),
 	}
 }
 
 func (rs *ROBStage[T]) Init(ctx context.Context) error {
 	rs.tel.LogInfo("initializing")
 	defer rs.tel.LogInfo("initialized")
+
+	// Initialize the rob and set the read timeout of
+	// the input connector to the reset timeout
+	rs.inputConnector.SetReadTimeout(rs.cfg.ResetTimeout)
+	rs.rob = rob.NewROB(rs.outputConnector, &rob.Config{
+		MaxSeqNum:           rs.cfg.MaxSeqNum,
+		PrimaryBufferSize:   rs.cfg.PrimaryBufferSize,
+		AuxiliaryBufferSize: rs.cfg.AuxiliaryBufferSize,
+		FlushTreshold:       rs.cfg.FlushTreshold,
+		BaseAlpha:           rs.cfg.BaseAlpha,
+		JumpThreshold:       rs.cfg.JumpThreshold,
+	})
 
 	rs.initMetrics()
 
@@ -106,6 +143,7 @@ func (rs *ROBStage[T]) Run(ctx context.Context) {
 	rs.tel.LogInfo("running")
 	defer rs.tel.LogInfo("stopped")
 
+	resetNeeded := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,30 +152,34 @@ func (rs *ROBStage[T]) Run(ctx context.Context) {
 			return
 
 		default:
-			lastRecvTime := time.Now()
-
 			msgIn, err := rs.inputConnector.Read()
 			if err != nil {
 				if errors.Is(err, connector.ErrClosed) {
 					return
-				} else if errors.Is(err, connector.ErrReadTimeout) {
-					// Timeout, reset and flush the ROB
-					rs.rob.FlushAndReset()
-					rs.resets.Add(1)
-				} else {
-					rs.tel.LogError("failed to read from input connector", err)
 				}
 
-				continue
-			}
+				// Check if the input connector has timed out
+				if errors.Is(err, connector.ErrReadTimeout) {
+					// Check if the rob has to be reset
+					if resetNeeded {
+						rs.rob.FlushAndReset()
+						rs.resets.Add(1)
+						resetNeeded = false
 
-			if time.Since(lastRecvTime) >= rs.cfg.ResetTimeout {
-				rs.rob.FlushAndReset()
-				rs.resets.Add(1)
+						rs.tel.LogInfo("resetting and flushing re-order buffer")
+					}
+
+					continue
+				}
+
+				rs.tel.LogError("failed to read from input connector", err)
+				continue
 			}
 
 			// Try to enqueue the message
 			rs.enqueue(msgIn)
+
+			resetNeeded = true
 		}
 	}
 }

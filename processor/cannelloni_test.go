@@ -1,4 +1,4 @@
-package cannelloni
+package processor
 
 import (
 	"encoding/binary"
@@ -18,7 +18,7 @@ func (d *dummyMsgIn) GetBytes() []byte {
 func Benchmark_cannelloniWorker_decodeFrame(b *testing.B) {
 	b.ReportAllocs()
 
-	adapter := &worker[*dummyMsgIn]{}
+	adapter := &cannelloniWorker[*dummyMsgIn]{}
 	frame := getCannelloniEncodedFrame()
 
 	b.ResetTimer()

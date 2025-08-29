@@ -3,21 +3,21 @@ package main
 import (
 	"context"
 
-	"github.com/squadracorsepolito/acmetel/can"
+	"github.com/squadracorsepolito/acmetel/processor"
 	"github.com/squadracorsepolito/acmetel/questdb"
 )
 
-type rawHandler struct{}
+type canToQuestDBHandler struct{}
 
-func newRawHandler() *rawHandler {
-	return &rawHandler{}
+func newCANToQuestDBHandler() *canToQuestDBHandler {
+	return &canToQuestDBHandler{}
 }
 
-func (h *rawHandler) Init(_ context.Context) error {
+func (h *canToQuestDBHandler) Init(_ context.Context) error {
 	return nil
 }
 
-func (h *rawHandler) Handle(_ context.Context, canMsg *can.Message, qdbMsg *questdb.Message) error {
+func (h *canToQuestDBHandler) Handle(_ context.Context, canMsg *processor.CANMessage, qdbMsg *questdb.Message) error {
 	rows := make([]*questdb.Row, 0, canMsg.SignalCount)
 
 	for _, sig := range canMsg.Signals {
@@ -33,16 +33,16 @@ func (h *rawHandler) Handle(_ context.Context, canMsg *can.Message, qdbMsg *ques
 		columns = append(columns, questdb.NewIntColumn("raw_value", int64(sig.RawValue)))
 
 		switch valType {
-		case can.ValueTypeFlag:
+		case processor.CANSignalValueTypeFlag:
 			columns = append(columns, questdb.NewBoolColumn("flag_value", sig.ValueFlag))
 
-		case can.ValueTypeInt:
+		case processor.CANSignalValueTypeInt:
 			columns = append(columns, questdb.NewIntColumn("integer_value", sig.ValueInt))
 
-		case can.ValueTypeFloat:
+		case processor.CANSignalValueTypeFloat:
 			columns = append(columns, questdb.NewFloatColumn("float_value", sig.ValueFloat))
 
-		case can.ValueTypeEnum:
+		case processor.CANSignalValueTypeEnum:
 			row.AddSymbol(questdb.NewSymbol("enum_value", sig.ValueEnum))
 		}
 
@@ -55,17 +55,17 @@ func (h *rawHandler) Handle(_ context.Context, canMsg *can.Message, qdbMsg *ques
 	return nil
 }
 
-func (h *rawHandler) Close() {}
+func (h *canToQuestDBHandler) Close() {}
 
-func (h *rawHandler) getTable(valType can.ValueType) string {
+func (h *canToQuestDBHandler) getTable(valType processor.CANSignalValueType) string {
 	switch valType {
-	case can.ValueTypeFlag:
+	case processor.CANSignalValueTypeFlag:
 		return "flag_signals"
-	case can.ValueTypeInt:
+	case processor.CANSignalValueTypeInt:
 		return "int_signals"
-	case can.ValueTypeFloat:
+	case processor.CANSignalValueTypeFloat:
 		return "float_signals"
-	case can.ValueTypeEnum:
+	case processor.CANSignalValueTypeEnum:
 		return "enum_signals"
 	default:
 		return "unknown_signals"

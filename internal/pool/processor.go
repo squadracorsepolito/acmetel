@@ -9,8 +9,8 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
-// Handler is a worker pool intended to be used by an handler stage.
-type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]] struct {
+// Processor is a worker pool intended to be used by a processor stage.
+type Processor[W, InitArgs any, In, Out message.Message, WPtr ProcessorWorkerPtr[W, InitArgs, In, Out]] struct {
 	tel *internal.Telemetry
 
 	cfg *Config
@@ -28,9 +28,9 @@ type Handler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, 
 	handlingErrors  atomic.Int64
 }
 
-// NewHandler returns a new handler worker pool.
-func NewHandler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Handler[W, InitArgs, In, Out, WPtr] {
-	return &Handler[W, InitArgs, In, Out, WPtr]{
+// NewProcessor returns a new processor worker pool.
+func NewProcessor[W, InitArgs any, In, Out message.Message, WPtr ProcessorWorkerPtr[W, InitArgs, In, Out]](tel *internal.Telemetry, cfg *Config) *Processor[W, InitArgs, In, Out, WPtr] {
+	return &Processor[W, InitArgs, In, Out, WPtr]{
 		tel: tel,
 
 		cfg: cfg,
@@ -45,7 +45,7 @@ func NewHandler[W, InitArgs any, In, Out message.Message, WPtr HandlerWorkerPtr[
 }
 
 // Init initialises the worker pool.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs InitArgs) error {
 	p.initMetrics()
 
 	p.initArgs = initArgs
@@ -54,17 +54,17 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) Init(ctx context.Context, initArgs
 	return nil
 }
 
-func (p *Handler[W, InitArgs, In, Out, WPtr]) initMetrics() {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) initMetrics() {
 	p.tel.NewCounter("worker_pool_handled_messages", func() int64 { return p.handledMessages.Load() })
 }
 
 // Run runs the worker pool.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) Run(ctx context.Context) {
 	go p.runStartWorkerListener(ctx)
 	go p.scaler.run(ctx)
 }
 
-func (p *Handler[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Context) {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context.Context) {
 	startWorkerCh := p.scaler.getStartCh()
 
 	for {
@@ -78,7 +78,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runStartWorkerListener(ctx context
 	}
 }
 
-func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 	var dummyWorker W
 	worker := WPtr(&dummyWorker)
 
@@ -145,7 +145,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 }
 
 // Close closes the worker pool.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) Close() {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) Close() {
 	p.tel.LogInfo("closing worker pool")
 
 	p.fanOut.close()
@@ -157,7 +157,7 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) Close() {
 }
 
 // AddMessage adds a new task to the worker pool queue.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) AddMessage(ctx context.Context, msgIn In) error {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) AddMessage(ctx context.Context, msgIn In) error {
 	if err := p.fanOut.addTask(ctx, msgIn); err != nil {
 		return err
 	}
@@ -168,6 +168,6 @@ func (p *Handler[W, InitArgs, In, Out, WPtr]) AddMessage(ctx context.Context, ms
 }
 
 // ExtractMessage extracts a message from the worker pool output queue.
-func (p *Handler[W, InitArgs, In, Out, WPtr]) ExtractMessage() (Out, error) {
+func (p *Processor[W, InitArgs, In, Out, WPtr]) ExtractMessage() (Out, error) {
 	return p.fanIn.readTask()
 }

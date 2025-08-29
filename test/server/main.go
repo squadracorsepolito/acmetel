@@ -10,12 +10,9 @@ import (
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel"
-	"github.com/squadracorsepolito/acmetel/can"
-	"github.com/squadracorsepolito/acmetel/cannelloni"
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/processor"
 	"github.com/squadracorsepolito/acmetel/questdb"
-	"github.com/squadracorsepolito/acmetel/raw"
 	"github.com/squadracorsepolito/acmetel/udp"
 
 	"go.opentelemetry.io/otel"
@@ -28,7 +25,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
-const connectorSize = 4096
+const connectorSize = 2048
 
 func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -48,33 +45,32 @@ func main() {
 	otel.SetMeterProvider(meterProvider)
 
 	udpToCannelloni := connector.NewRingBuffer[*udp.Message](connectorSize)
-	cannelloniToROB := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
-
-	robToCAN := connector.NewRingBuffer[*cannelloni.Message](connectorSize)
-
-	canToRaw := connector.NewRingBuffer[*can.Message](connectorSize)
-	rawToQuestDB := connector.NewRingBuffer[*questdb.Message](connectorSize)
+	cannelloniToROB := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)
+	robToCAN := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)
+	canToCustom := connector.NewRingBuffer[*processor.CANMessage](connectorSize)
+	customToQuestDB := connector.NewRingBuffer[*questdb.Message](connectorSize)
 
 	udpCfg := udp.NewDefaultConfig()
 	udpStage := udp.NewStage(udpToCannelloni, udpCfg)
 
-	cannelloniCfg := cannelloni.NewDefaultConfig()
-	cannelloniStage := cannelloni.NewStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
+	cannelloniCfg := processor.DefaultCannelloniConfig()
+	cannelloniStage := processor.NewCannelloniStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
 
 	robCfg := processor.DefaultROBConfig()
 	robStage := processor.NewROBStage(cannelloniToROB, robToCAN, robCfg)
 
-	canCfg := can.NewDefaultConfig()
+	canCfg := processor.DefaultCANConfig()
 	canCfg.Messages = getMessages()
-	canStage := can.NewStage(robToCAN, canToRaw, canCfg)
+	canStage := processor.NewCANStage(robToCAN, canToCustom, canCfg)
 
-	rawCfg := raw.NewDefaultConfig()
-	rawCfg.PoolConfig.MinWorkers = rawCfg.PoolConfig.InitialWorkers
-	rawStage := raw.NewStage("can_to_questdb", newRawHandler(), canToRaw, rawToQuestDB, rawCfg)
+	customCfg := processor.DefaultCustomConfig()
+	customCfg.Name = "can_to_questdb"
+	customCfg.PoolConfig.MinWorkers = customCfg.PoolConfig.InitialWorkers
+	customStage := processor.NewCustomStage(newCANToQuestDBHandler(), canToCustom, customToQuestDB, customCfg)
 
 	questDBCfg := questdb.NewDefaultConfig()
 	questDBCfg.PoolConfig.MinWorkers = questDBCfg.PoolConfig.InitialWorkers
-	questDBStage := questdb.NewStage(rawToQuestDB, questDBCfg)
+	questDBStage := questdb.NewStage(customToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()
 
@@ -82,7 +78,7 @@ func main() {
 	pipeline.AddStage(cannelloniStage)
 	pipeline.AddStage(robStage)
 	pipeline.AddStage(canStage)
-	pipeline.AddStage(rawStage)
+	pipeline.AddStage(customStage)
 	pipeline.AddStage(questDBStage)
 
 	if err := pipeline.Init(ctx); err != nil {

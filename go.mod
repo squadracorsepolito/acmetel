@@ -2,12 +2,15 @@ module github.com/squadracorsepolito/acmetel
 
 go 1.24.0
 
+ignore ./test/grafana-data
+
 require (
 	github.com/lmittmann/tint v1.0.7
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/questdb/go-questdb-client/v3 v3.2.0
-	github.com/squadracorsepolito/acmelib v1.15.2
+	github.com/segmentio/kafka-go v0.4.49
+	github.com/squadracorsepolito/acmelib v1.16.1
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.36.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.36.0
@@ -32,7 +35,6 @@ require (
 	github.com/klauspost/compress v1.17.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/segmentio/kafka-go v0.4.49 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.6.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
