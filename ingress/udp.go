@@ -1,0 +1,229 @@
+package ingress
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/netip"
+	"sync/atomic"
+	"time"
+
+	"github.com/squadracorsepolito/acmetel/internal"
+	"github.com/squadracorsepolito/acmetel/internal/message"
+	"github.com/squadracorsepolito/acmetel/internal/stage"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+const (
+	udpPayloadSize = 1474
+)
+
+//////////////
+//  CONFIG  //
+//////////////
+
+// UDPConfig structs contains the configuration for the UDP stage.
+type UDPConfig struct {
+	// IPAddr is the IP address to listen on.
+	//
+	// Default: 127.0.0.1
+	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+
+	// Port is the port to listen on.
+	//
+	// Default: 20_000
+	Port uint16 `yaml:"port" json:"port"`
+}
+
+// DefaultUDPConfig returns the default configuration for the UDP stage.
+func DefaultUDPConfig() *UDPConfig {
+	return &UDPConfig{
+		IPAddr: "127.0.0.1",
+		Port:   20_000,
+	}
+}
+
+///////////////
+//  MESSAGE  //
+//////////////
+
+var _ message.Serializable = (*UDPMessage)(nil)
+
+// UDPMessage represents a UDP message.
+type UDPMessage struct {
+	message.Base
+
+	// Payload of the UDP datagram.
+	Payload []byte
+	// PayloadSize is the number of bytes of the payload.
+	PayloadSize int
+}
+
+func newUDPMessage(payload []byte, payloadSize int) *UDPMessage {
+	return &UDPMessage{
+		Payload:     payload,
+		PayloadSize: payloadSize,
+	}
+}
+
+// GetBytes returns the bytes of the UDP payload.
+func (um *UDPMessage) GetBytes() []byte {
+	return um.Payload
+}
+
+//////////////
+//  SOURCE  //
+//////////////
+
+var _ stage.Source[*UDPMessage] = (*udpSource)(nil)
+
+type udpSource struct {
+	tel *internal.Telemetry
+
+	conn *net.UDPConn
+
+	// Metrics
+	receivedMessages atomic.Int64
+	receivedBytes    atomic.Int64
+}
+
+func newUDPSource() *udpSource {
+	return &udpSource{}
+}
+
+func (us *udpSource) SetTelemetry(tel *internal.Telemetry) {
+	us.tel = tel
+}
+
+func (us *udpSource) init(ipAddr string, port uint16) error {
+	parsedAddr, err := netip.ParseAddr(ipAddr)
+	if err != nil {
+		return err
+	}
+
+	addr := net.UDPAddrFromAddrPort(netip.AddrPortFrom(parsedAddr, port))
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	us.conn = conn
+
+	us.initMetrics()
+
+	return nil
+}
+
+func (us *udpSource) initMetrics() {
+	us.tel.NewCounter("received_messages", func() int64 { return us.receivedMessages.Load() })
+	us.tel.NewCounter("received_bytes", func() int64 { return us.receivedBytes.Load() })
+}
+
+func (us *udpSource) Run(ctx context.Context, outConnector conn[*UDPMessage]) {
+	// Hacky method to close the connection when the context is done
+	go func() {
+		<-ctx.Done()
+		us.conn.Close()
+	}()
+
+	buf := make([]byte, udpPayloadSize)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// read the UDP payload
+		_, err := us.conn.Read(buf)
+		if err != nil {
+			// Check if the connection is closed
+			if errors.Is(err, net.ErrClosed) {
+				select {
+				case <-ctx.Done():
+					return
+
+				default:
+					us.tel.LogError("failed to read connection", err)
+				}
+
+				return
+			}
+
+			us.tel.LogError("server failed to read", err)
+
+			return
+		}
+
+		// Handle the buffer and send the message
+		if err := outConnector.Write(us.handleBuf(ctx, buf)); err != nil {
+			us.tel.LogError("failed to write message to output connector", err)
+		}
+
+		us.receivedMessages.Add(1)
+	}
+}
+
+func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
+	// Create the trace for the incoming datagram
+	_, span := us.tel.NewTrace(ctx, "receive UDP datagram")
+	defer span.End()
+
+	// Extract the payload from the buffer
+	payloadSize := len(buf)
+	payload := make([]byte, payloadSize)
+	copy(payload, buf)
+
+	// Create the UDP message
+	udpMsg := newUDPMessage(payload, payloadSize)
+
+	// Set the receive time and the timestamp
+	recvTime := time.Now()
+	udpMsg.SetReceiveTime(recvTime)
+	udpMsg.SetTimestamp(recvTime)
+
+	// Save the span into the message
+	span.SetAttributes(attribute.Int("payload_size", payloadSize))
+	udpMsg.SaveSpan(span)
+
+	// Update metrics
+	us.receivedBytes.Add(int64(payloadSize))
+
+	return udpMsg
+}
+
+/////////////
+//  STAGE  //
+/////////////
+
+// UDPStage is an ingress stage that reads UDP datagrams.
+type UDPStage struct {
+	*stage.Ingress[*UDPMessage]
+
+	cfg *UDPConfig
+
+	source *udpSource
+}
+
+// NewUDPStage returns a new UDP stage.
+func NewUDPStage(outputConnector conn[*UDPMessage], cfg *UDPConfig) *UDPStage {
+	source := newUDPSource()
+
+	return &UDPStage{
+		Ingress: stage.NewIngress("udp", source, outputConnector),
+
+		cfg: cfg,
+
+		source: source,
+	}
+}
+
+// Init initializes the stage.
+func (us *UDPStage) Init(ctx context.Context) error {
+	if err := us.source.init(us.cfg.IPAddr, us.cfg.Port); err != nil {
+		return err
+	}
+
+	return us.Ingress.Init(ctx)
+}

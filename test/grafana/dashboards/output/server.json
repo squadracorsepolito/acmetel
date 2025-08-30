@@ -114,7 +114,7 @@
                   "type": "prometheus",
                   "uid": "$metrics"
                },
-               "expr": "worker_pool_received_messages_total",
+               "expr": "received_messages_total",
                "interval": "15s"
             }
          ],

@@ -24,7 +24,7 @@ g.dashboard.new('Acmetel Sever')
 
       p.stat.base('Received Bytes Total', prometheus.counter('received_bytes_total'), unit='decbytes', color='yellow', w=3),
 
-      p.stat.base('Received Messages', prometheus.counter('worker_pool_received_messages_total'), color='purple', w=3),
+      p.stat.base('Received Messages', prometheus.counter('received_messages_total'), color='purple', w=3),
 
       p.stat.base(
         'Handled Messages',

@@ -17,60 +17,65 @@ import (
 //  CONFIG  //
 //////////////
 
+// KafkaConfig structs contains the configuration for the Kafka egress stage.
 type KafkaConfig struct {
+	// PoolConfig contains the configuration for the worker pool.
 	PoolConfig *pool.Config
 
-	Brokers []string
+	// A list of Kafka brokers to connect to.
+	//
+	// Default: localhost:9092
+	Brokers []string `yaml:"brokers" json:"brokers"`
 
 	// The balancer used to distribute messages across partitions.
 	//
-	// The default is to use a round-robin distribution.
+	// Default: RoundRobin.
 	Balancer kafka.Balancer
 
 	// Limit on how many attempts will be made to deliver a message.
 	//
-	// The default is to try at most 10 times.
-	MaxAttempts int
+	// Default: 10.
+	MaxAttempts int `yaml:"max_attempts" json:"max_attempts"`
 
 	// WriteBackoffMin optionally sets the smallest amount of time the writer waits before
 	// it attempts to write a batch of messages
 	//
 	// Default: 100ms
-	WriteBackoffMin time.Duration
+	WriteBackoffMin time.Duration `yaml:"write_backoff_min" json:"write_backoff_min"`
 
 	// WriteBackoffMax optionally sets the maximum amount of time the writer waits before
 	// it attempts to write a batch of messages
 	//
 	// Default: 1s
-	WriteBackoffMax time.Duration
+	WriteBackoffMax time.Duration `yaml:"write_backoff_max" json:"write_backoff_max"`
 
 	// Limit on how many messages will be buffered before being sent to a
 	// partition.
 	//
 	// The default is to use a target batch size of 100 messages.
-	BatchSize int
+	BatchSize int `yaml:"batch_size" json:"batch_size"`
 
 	// Limit the maximum size of a request in bytes before being sent to
 	// a partition.
 	//
 	// The default is to use a kafka default value of 1048576.
-	BatchBytes int64
+	BatchBytes int64 `yaml:"batch_bytes" json:"batch_bytes"`
 
 	// Time limit on how often incomplete message batches will be flushed to
 	// kafka.
 	//
 	// The default is to flush at least every second.
-	BatchTimeout time.Duration
+	BatchTimeout time.Duration `yaml:"batch_timeout" json:"batch_timeout"`
 
 	// Timeout for read operations performed by the Writer.
 	//
 	// Defaults to 10 seconds.
-	ReadTimeout time.Duration
+	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
 
 	// Timeout for write operation performed by the Writer.
 	//
 	// Defaults to 10 seconds.
-	WriteTimeout time.Duration
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
 
 	// Number of acknowledges from partition replicas required before receiving
 	// a response to a produce request, the following values are supported:
@@ -88,7 +93,7 @@ type KafkaConfig struct {
 	// whether the messages were written to kafka.
 	//
 	// Defaults to true.
-	Async bool
+	Async bool `yaml:"async" json:"async"`
 
 	// Compression set the compression codec to be used to compress messages.
 	Compression kafka.Compression
@@ -99,9 +104,10 @@ type KafkaConfig struct {
 	Transport kafka.RoundTripper
 
 	// AllowAutoTopicCreation notifies writer to create topic if missing.
-	AllowAutoTopicCreation bool
+	AllowAutoTopicCreation bool `yaml:"allow_auto_topic_creation" json:"allow_auto_topic_creation"`
 }
 
+// DefaultKafkaConfig returns a default Kafka egress config.
 func DefaultKafkaConfig() *KafkaConfig {
 	return &KafkaConfig{
 		PoolConfig: pool.DefaultConfig(),
@@ -127,16 +133,21 @@ func DefaultKafkaConfig() *KafkaConfig {
 //  MESSAGE  //
 ///////////////
 
+// KafkaMessage represents the message used by the Kafka egress stage.
 type KafkaMessage struct {
 	message.Base
 
+	// Topic is the Kafka topic.
 	Topic string
-	Key   []byte
+	// Key is the key of the Kafka message.
+	Key []byte
+	// Value is the value associated to the key.
 	Value []byte
 
 	headers []kafka.Header
 }
 
+// AddHeader adds a new Kafka header to the message.
 func (km *KafkaMessage) AddHeader(key string, value []byte) {
 	km.headers = append(km.headers, kafka.Header{
 		Key:   key,
@@ -204,6 +215,7 @@ func (kw *kafkaWorker) Close(_ context.Context) error { return nil }
 //  STAGE  //
 /////////////
 
+// KafkaStage is an egress stage that writes messages to Kafka.
 type KafkaStage struct {
 	*stage.Egress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs, *kafkaWorker]
 
@@ -212,6 +224,7 @@ type KafkaStage struct {
 	writer *kafka.Writer
 }
 
+// NewKafkaStage returns a new Kafka egress stage.
 func NewKafkaStage(inputConnector connector.Connector[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
 	return &KafkaStage{
 		Egress: stage.NewEgress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs]("kafka", inputConnector, cfg.PoolConfig),
@@ -220,6 +233,7 @@ func NewKafkaStage(inputConnector connector.Connector[*KafkaMessage], cfg *Kafka
 	}
 }
 
+// Init initializes the stage.
 func (ks *KafkaStage) Init(ctx context.Context) error {
 	ks.writer = &kafka.Writer{
 		Addr:                   kafka.TCP(ks.cfg.Brokers...),
@@ -242,6 +256,7 @@ func (ks *KafkaStage) Init(ctx context.Context) error {
 	return ks.Egress.Init(ctx, newKafkaWorkerArgs(ks.writer))
 }
 
+// Close closes the stage.
 func (ks *KafkaStage) Close() {
 	ks.Egress.Close()
 

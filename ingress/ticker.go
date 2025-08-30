@@ -16,16 +16,17 @@ import (
 //  CONFIG  //
 //////////////
 
+// TickerConfig structs contains the configuration for the Ticker stage.
 type TickerConfig struct {
-	WriterQueueSize int
-
-	Interval time.Duration
+	// Interval is the duration between ticks.
+	//
+	// Default: 100ms
+	Interval time.Duration `yaml:"interval" json:"interval"`
 }
 
+// DefaultTickerConfig returns the default configuration for the Ticker stage.
 func DefaultTickerConfig() *TickerConfig {
 	return &TickerConfig{
-		WriterQueueSize: 256,
-
 		Interval: 100 * time.Millisecond,
 	}
 }
@@ -34,6 +35,7 @@ func DefaultTickerConfig() *TickerConfig {
 //  MESSAGE  //
 ///////////////
 
+// TickerMessage is the message returned by the Ticker stage.
 type TickerMessage struct {
 	message.Base
 
@@ -55,7 +57,7 @@ type tickerSource struct {
 
 	ticker *time.Ticker
 
-	// Telemetry metrics
+	// Metrics
 	triggeredMessages atomic.Int64
 }
 
@@ -71,7 +73,7 @@ func (ts *tickerSource) init(interval time.Duration) {
 	ts.ticker = time.NewTicker(interval)
 }
 
-func (ts *tickerSource) Run(ctx context.Context, out chan<- *TickerMessage) {
+func (ts *tickerSource) Run(ctx context.Context, outConnector conn[*TickerMessage]) {
 	ticks := 0
 
 	for {
@@ -81,7 +83,9 @@ func (ts *tickerSource) Run(ctx context.Context, out chan<- *TickerMessage) {
 		case <-ctx.Done():
 			return
 		case <-ts.ticker.C:
-			out <- ts.handleTrigger(ctx, ticks)
+			if err := outConnector.Write(ts.handleTrigger(ctx, ticks)); err != nil {
+				ts.tel.LogError("failed to write message to output connector", err)
+			}
 		}
 	}
 }
@@ -108,6 +112,7 @@ func (ts *tickerSource) handleTrigger(ctx context.Context, tick int) *TickerMess
 //  STAGE  //
 /////////////
 
+// TickerStage is an ingress stage that ticks periodically.
 type TickerStage struct {
 	*stage.Ingress[*TickerMessage]
 
@@ -116,13 +121,12 @@ type TickerStage struct {
 	source *tickerSource
 }
 
+// NewTickerStage returns a new Ticker stage.
 func NewTickerStage(outConnector connector.Connector[*TickerMessage], cfg *TickerConfig) *TickerStage {
 	source := newTickerSource()
 
 	return &TickerStage{
-		Ingress: stage.NewIngress(
-			"ticker", source, outConnector, cfg.WriterQueueSize,
-		),
+		Ingress: stage.NewIngress("ticker", source, outConnector),
 
 		cfg: cfg,
 
@@ -130,6 +134,7 @@ func NewTickerStage(outConnector connector.Connector[*TickerMessage], cfg *Ticke
 	}
 }
 
+// Init initializes the stage.
 func (s *TickerStage) Init(ctx context.Context) error {
 	s.source.init(s.cfg.Interval)
 

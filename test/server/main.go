@@ -11,9 +11,9 @@ import (
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel"
 	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/egress"
+	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/processor"
-	"github.com/squadracorsepolito/acmetel/questdb"
-	"github.com/squadracorsepolito/acmetel/udp"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -44,14 +44,14 @@ func main() {
 	defer meterProvider.Shutdown(ctx)
 	otel.SetMeterProvider(meterProvider)
 
-	udpToCannelloni := connector.NewRingBuffer[*udp.Message](connectorSize)
+	udpToCannelloni := connector.NewRingBuffer[*ingress.UDPMessage](connectorSize)
 	cannelloniToROB := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)
 	robToCAN := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)
 	canToCustom := connector.NewRingBuffer[*processor.CANMessage](connectorSize)
-	customToQuestDB := connector.NewRingBuffer[*questdb.Message](connectorSize)
+	customToQuestDB := connector.NewRingBuffer[*egress.QuestDBMessage](connectorSize)
 
-	udpCfg := udp.NewDefaultConfig()
-	udpStage := udp.NewStage(udpToCannelloni, udpCfg)
+	udpCfg := ingress.DefaultUDPConfig()
+	udpStage := ingress.NewUDPStage(udpToCannelloni, udpCfg)
 
 	cannelloniCfg := processor.DefaultCannelloniConfig()
 	cannelloniStage := processor.NewCannelloniStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
@@ -68,9 +68,9 @@ func main() {
 	customCfg.PoolConfig.MinWorkers = customCfg.PoolConfig.InitialWorkers
 	customStage := processor.NewCustomStage(newCANToQuestDBHandler(), canToCustom, customToQuestDB, customCfg)
 
-	questDBCfg := questdb.NewDefaultConfig()
+	questDBCfg := egress.DefaultQuestDBConfig()
 	questDBCfg.PoolConfig.MinWorkers = questDBCfg.PoolConfig.InitialWorkers
-	questDBStage := questdb.NewStage(customToQuestDB, questDBCfg)
+	questDBStage := egress.NewQuestDBStage(customToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()
 

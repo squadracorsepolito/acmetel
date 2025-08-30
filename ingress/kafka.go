@@ -19,19 +19,22 @@ import (
 //  CONFIG  //
 //////////////
 
+// KafkaConfig structs contains the configuration for the Kafka ingress stage.
 type KafkaConfig struct {
-	WriterQueueSize int
-
 	// The list of broker addresses used to connect to the kafka cluster.
-	Brokers []string
+	//
+	// Default: "localhost:9092"
+	Brokers []string `yaml:"brokers" json:"brokers"`
 
 	// GroupID holds the consumer group id.
-	GroupID string
+	//
+	// Default: "group"
+	GroupID string `yaml:"group_id" json:"group_id"`
 
 	// Topics allows specifying multiple topics, but can only be used in
 	// combination with GroupID, as it is a consumer-group feature. As such, if
 	// GroupID is set, then either Topic or Topics must be defined.
-	Topics []string
+	Topics []string `yaml:"topics" json:"topics"`
 
 	// An dialer used to open connections to the kafka server. This field is
 	// optional, if nil, the default dialer is used instead.
@@ -39,7 +42,7 @@ type KafkaConfig struct {
 
 	// The capacity of the internal message queue, defaults to 100 if none is
 	// set.
-	QueueCapacity int
+	QueueCapacity int `yaml:"queue_capacity" json:"queue_capacity"`
 
 	// MinBytes indicates to the broker the minimum batch size that the consumer
 	// will accept. Setting a high minimum when consuming from a low-volume topic
@@ -47,25 +50,25 @@ type KafkaConfig struct {
 	// satisfy the defined minimum.
 	//
 	// Default: 1
-	MinBytes int
+	MinBytes int `yaml:"min_bytes" json:"min_bytes"`
 
 	// MaxBytes indicates to the broker the maximum batch size that the consumer
 	// will accept. The broker will truncate a message to satisfy this maximum, so
 	// choose a value that is high enough for your largest message size.
 	//
 	// Default: 1MB
-	MaxBytes int
+	MaxBytes int `yaml:"max_bytes" json:"max_bytes"`
 
 	// Maximum amount of time to wait for new data to come when fetching batches
 	// of messages from kafka.
 	//
 	// Default: 10s
-	MaxWait time.Duration
+	MaxWait time.Duration `yaml:"max_wait" json:"max_wait"`
 
 	// ReadBatchTimeout amount of time to wait to fetch message from kafka messages batch.
 	//
 	// Default: 10s
-	ReadBatchTimeout time.Duration
+	ReadBatchTimeout time.Duration `yaml:"read_batch_timeout" json:"read_batch_timeout"`
 
 	// GroupBalancers is the priority-ordered list of client-side consumer group
 	// balancing strategies that will be offered to the coordinator.  The first
@@ -82,7 +85,7 @@ type KafkaConfig struct {
 	// Default: 3s
 	//
 	// Only used when GroupID is set
-	HeartbeatInterval time.Duration
+	HeartbeatInterval time.Duration `yaml:"heartbeat_interval" json:"heartbeat_interval"`
 
 	// CommitInterval indicates the interval at which offsets are committed to
 	// the broker.  If 0, commits will be handled synchronously.
@@ -90,7 +93,7 @@ type KafkaConfig struct {
 	// Default: 0
 	//
 	// Only used when GroupID is set
-	CommitInterval time.Duration
+	CommitInterval time.Duration `yaml:"commit_interval" json:"commit_interval"`
 
 	// PartitionWatchInterval indicates how often a reader checks for partition changes.
 	// If a reader sees a partition change (such as a partition add) it will rebalance the group
@@ -99,11 +102,11 @@ type KafkaConfig struct {
 	// Default: 5s
 	//
 	// Only used when GroupID is set and WatchPartitionChanges is set.
-	PartitionWatchInterval time.Duration
+	PartitionWatchInterval time.Duration `yaml:"partition_watch_interval" json:"partition_watch_interval"`
 
 	// WatchForPartitionChanges is used to inform kafka-go that a consumer group should be
 	// polling the brokers and rebalancing if any partition changes happen to the topic.
-	WatchPartitionChanges bool
+	WatchPartitionChanges bool `yaml:"watch_partition_changes" json:"watch_partition_changes"`
 
 	// SessionTimeout optionally sets the length of time that may pass without a heartbeat
 	// before the coordinator considers the consumer dead and initiates a rebalance.
@@ -111,7 +114,7 @@ type KafkaConfig struct {
 	// Default: 30s
 	//
 	// Only used when GroupID is set
-	SessionTimeout time.Duration
+	SessionTimeout time.Duration `yaml:"session_timeout" json:"session_timeout"`
 
 	// RebalanceTimeout optionally sets the length of time the coordinator will wait
 	// for members to join as part of a rebalance.  For kafka servers under higher
@@ -120,13 +123,13 @@ type KafkaConfig struct {
 	// Default: 30s
 	//
 	// Only used when GroupID is set
-	RebalanceTimeout time.Duration
+	RebalanceTimeout time.Duration `yaml:"rebalance_timeout" json:"rebalance_timeout"`
 
 	// JoinGroupBackoff optionally sets the length of time to wait between re-joining
 	// the consumer group after an error.
 	//
 	// Default: 5s
-	JoinGroupBackoff time.Duration
+	JoinGroupBackoff time.Duration `yaml:"join_group_backoff" json:"join_group_backoff"`
 
 	// RetentionTime optionally sets the length of time the consumer group will be saved
 	// by the broker. -1 will disable the setting and leave the
@@ -136,7 +139,7 @@ type KafkaConfig struct {
 	// Default: -1
 	//
 	// Only used when GroupID is set
-	RetentionTime time.Duration
+	RetentionTime time.Duration `yaml:"retention_time" json:"retention_time"`
 
 	// StartOffset determines from whence the consumer group should begin
 	// consuming when it finds a partition without a committed offset.  If
@@ -145,31 +148,33 @@ type KafkaConfig struct {
 	// Default: FirstOffset
 	//
 	// Only used when GroupID is set
-	StartOffset int64
+	StartOffset int64 `yaml:"start_offset" json:"start_offset"`
 
 	// BackoffDelayMin optionally sets the smallest amount of time the reader will wait before
 	// polling for new messages
 	//
 	// Default: 100ms
-	ReadBackoffMin time.Duration
+	ReadBackoffMin time.Duration `yaml:"read_backoff_min" json:"read_backoff_min"`
 
 	// BackoffDelayMax optionally sets the maximum amount of time the reader will wait before
 	// polling for new messages
 	//
 	// Default: 1s
-	ReadBackoffMax time.Duration
+	ReadBackoffMax time.Duration `yaml:"read_backoff_max" json:"read_backoff_max"`
 
 	// IsolationLevel controls the visibility of transactional records.
 	// ReadUncommitted makes all records visible. With ReadCommitted only
 	// non-transactional and committed records are visible.
-	IsolationLevel kafka.IsolationLevel
+	IsolationLevel kafka.IsolationLevel `yaml:"isolation_level" json:"isolation_level"`
 
 	// Limit of how many attempts to connect will be made before returning the error.
 	//
 	// The default is to try 3 times.
-	MaxAttempts int
+	MaxAttempts int `yaml:"max_attempts" json:"max_attempts"`
 }
 
+// DefaultKafkaConfig returns a default kafka config.
+// There are NO default topics set.
 func DefaultKafkaConfig(topics ...string) *KafkaConfig {
 	groupBalancer := []kafka.GroupBalancer{
 		kafka.RangeGroupBalancer{},
@@ -177,8 +182,6 @@ func DefaultKafkaConfig(topics ...string) *KafkaConfig {
 	}
 
 	return &KafkaConfig{
-		WriterQueueSize: 256,
-
 		Brokers:                []string{"localhost:9092"},
 		GroupID:                "group",
 		Topics:                 topics,
@@ -208,6 +211,7 @@ func DefaultKafkaConfig(topics ...string) *KafkaConfig {
 //  MESSAGE  //
 ///////////////
 
+// KafkaMessage represents a message returned by the Kafka ingress stage.
 type KafkaMessage struct {
 	message.Base
 
@@ -233,8 +237,9 @@ type kafkaSource struct {
 
 	reader *kafka.Reader
 
-	// Telemetry metrics
-	receivedBytes atomic.Int64
+	// Metrics
+	receivedMessages atomic.Int64
+	receivedBytes    atomic.Int64
 }
 
 func newKafkaSource() *kafkaSource {
@@ -252,10 +257,11 @@ func (ks *kafkaSource) init(readerCfg kafka.ReaderConfig) {
 }
 
 func (ks *kafkaSource) initMetrics() {
+	ks.tel.NewCounter("received_messages", func() int64 { return ks.receivedMessages.Load() })
 	ks.tel.NewCounter("received_bytes", func() int64 { return ks.receivedBytes.Load() })
 }
 
-func (ks *kafkaSource) Run(ctx context.Context, out chan<- *KafkaMessage) {
+func (ks *kafkaSource) Run(ctx context.Context, outConnector conn[*KafkaMessage]) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -273,7 +279,11 @@ func (ks *kafkaSource) Run(ctx context.Context, out chan<- *KafkaMessage) {
 			continue
 		}
 
-		out <- ks.handleMessage(ctx, &msg)
+		if err := outConnector.Write(ks.handleMessage(ctx, &msg)); err != nil {
+			ks.tel.LogError("failed to write message to output connector", err)
+		}
+
+		ks.receivedMessages.Add(1)
 	}
 }
 
@@ -317,6 +327,7 @@ func (ks *kafkaSource) close() {
 //  STAGE  //
 /////////////
 
+// KafkaStage is an ingress stage that reads messages from Kafka.
 type KafkaStage struct {
 	*stage.Ingress[*KafkaMessage]
 
@@ -325,11 +336,12 @@ type KafkaStage struct {
 	source *kafkaSource
 }
 
+// NewKafkaStage returns a new Kafka ingress stage.
 func NewKafkaStage(outConnector connector.Connector[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
 	source := newKafkaSource()
 
 	return &KafkaStage{
-		Ingress: stage.NewIngress("kafka", source, outConnector, cfg.WriterQueueSize),
+		Ingress: stage.NewIngress("kafka", source, outConnector),
 
 		cfg: cfg,
 
@@ -337,6 +349,7 @@ func NewKafkaStage(outConnector connector.Connector[*KafkaMessage], cfg *KafkaCo
 	}
 }
 
+// Init initializes the stage.
 func (ks *KafkaStage) Init(ctx context.Context) error {
 	ks.source.init(kafka.ReaderConfig{
 		Brokers:                ks.cfg.Brokers,
@@ -367,6 +380,7 @@ func (ks *KafkaStage) Init(ctx context.Context) error {
 	return ks.Ingress.Init(ctx)
 }
 
+// Close closes the stage.
 func (ks *KafkaStage) Close() {
 	ks.Ingress.Close()
 	ks.source.close()
