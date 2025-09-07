@@ -132,6 +132,10 @@ func (p *Processor[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 				goto loopCleanup
 			}
 
+			if msgOut.IsDropped() {
+				goto loopCleanup
+			}
+
 			p.handledMessages.Add(1)
 
 			if err := p.fanIn.addTask(msgOut); err != nil {
