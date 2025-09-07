@@ -139,6 +139,7 @@ func (p *Processor[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 			}
 
 		loopCleanup:
+			msgIn.Destroy()
 			p.scaler.notifyTaskCompleted()
 		}
 	}

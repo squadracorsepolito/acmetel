@@ -58,13 +58,13 @@ func newCannelloniMessage() *CannelloniMessage {
 }
 
 // GetSequenceNumber returns the sequence number of the cannelloni frame.
-func (msg *CannelloniMessage) GetSequenceNumber() uint64 {
-	return uint64(msg.seqNum)
+func (cm *CannelloniMessage) GetSequenceNumber() uint64 {
+	return uint64(cm.seqNum)
 }
 
 // GetRawMessages returns the list of CAN messages contained in the cannelloni frame.
-func (msg *CannelloniMessage) GetRawMessages() []CANRawMessage {
-	return msg.Messages[:msg.MessageCount]
+func (cm *CannelloniMessage) GetRawMessages() []CANRawMessage {
+	return cm.Messages[:cm.MessageCount]
 }
 
 //////////////

@@ -1,6 +1,21 @@
 local g = import 'g.libsonnet';
 
 {
+  gauge: {
+    local gauge = g.panel.gauge,
+    local opts = gauge.options,
+    local stdOpts = gauge.standardOptions,
+
+    base(title, targets, color='green', unit='', w=6, h=6):
+      gauge.new(title)
+      + gauge.queryOptions.withTargets(targets)
+      + gauge.gridPos.withW(w)
+      + gauge.gridPos.withH(h)
+      + stdOpts.color.withMode('fixed')
+      + stdOpts.color.withFixedColor(color)
+      + stdOpts.withUnit(unit),
+  },
+
   stat: {
     local stat = g.panel.stat,
     local opts = stat.options,

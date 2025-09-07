@@ -20,6 +20,11 @@ g.dashboard.new('Acmetel Sever')
 + g.dashboard.withPanels(
   g.util.grid.wrapPanels(
     [
+      p.gauge.base('Memory Usage', [
+        prometheus.filteredCounter('go_memory_used_bytes', 'go_memory_type', 'other'),
+        prometheus.filteredCounter('go_memory_used_bytes', 'go_memory_type', 'stack'),
+      ], unit='decbytes', w=24),
+
       p.stat.byteRate('Received Bytes Rate', prometheus.rate('received_bytes_total')),
 
       p.stat.base('Received Bytes Total', prometheus.counter('received_bytes_total'), unit='decbytes', color='yellow', w=3),

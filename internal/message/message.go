@@ -27,6 +27,8 @@ type Message interface {
 	// LoadSpanContext loads the trace of the message
 	// into the provided context.
 	LoadSpanContext(ctx context.Context) context.Context
+
+	Destroy()
 }
 
 // ReOrderable interface defines the common methods for all re-orderable message types.

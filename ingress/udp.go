@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,14 @@ func DefaultUDPConfig() *UDPConfig {
 
 var _ message.Serializable = (*UDPMessage)(nil)
 
+var udpMessagePool = sync.Pool{
+	New: func() any {
+		return &UDPMessage{
+			Payload: make([]byte, udpPayloadSize),
+		}
+	},
+}
+
 // UDPMessage represents a UDP message.
 type UDPMessage struct {
 	message.Base
@@ -59,11 +68,19 @@ type UDPMessage struct {
 	PayloadSize int
 }
 
-func newUDPMessage(payload []byte, payloadSize int) *UDPMessage {
-	return &UDPMessage{
-		Payload:     payload,
-		PayloadSize: payloadSize,
-	}
+// func newUDPMessage(payload []byte, payloadSize int) *UDPMessage {
+// 	return &UDPMessage{
+// 		Payload:     payload,
+// 		PayloadSize: payloadSize,
+// 	}
+// }
+
+func newUDPMessage() *UDPMessage {
+	return udpMessagePool.Get().(*UDPMessage)
+}
+
+func (um *UDPMessage) Destroy() {
+	udpMessagePool.Put(um)
 }
 
 // GetBytes returns the bytes of the UDP payload.
@@ -170,13 +187,21 @@ func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
 	_, span := us.tel.NewTrace(ctx, "receive UDP datagram")
 	defer span.End()
 
+	// Create the UDP message
+	udpMsg := newUDPMessage()
+
 	// Extract the payload from the buffer
 	payloadSize := len(buf)
-	payload := make([]byte, payloadSize)
-	copy(payload, buf)
+	udpMsg.PayloadSize = payloadSize
+	copy(udpMsg.Payload, buf)
 
-	// Create the UDP message
-	udpMsg := newUDPMessage(payload, payloadSize)
+	// // Extract the payload from the buffer
+	// payloadSize := len(buf)
+	// payload := make([]byte, payloadSize)
+	// copy(payload, buf)
+
+	// // Create the UDP message
+	// udpMsg := newUDPMessage(payload, payloadSize)
 
 	// Set the receive time and the timestamp
 	recvTime := time.Now()

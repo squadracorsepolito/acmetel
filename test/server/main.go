@@ -15,6 +15,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/ingress"
 	"github.com/squadracorsepolito/acmetel/processor"
 
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -22,7 +23,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
 const connectorSize = 2048
@@ -43,6 +44,9 @@ func main() {
 	meterProvider := newMeterProvider(resource, meterExporter)
 	defer meterProvider.Shutdown(ctx)
 	otel.SetMeterProvider(meterProvider)
+	if err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second)); err != nil {
+		panic(err)
+	}
 
 	udpToCannelloni := connector.NewRingBuffer[*ingress.UDPMessage](connectorSize)
 	cannelloniToROB := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)

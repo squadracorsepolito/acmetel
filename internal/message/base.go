@@ -45,3 +45,5 @@ func (b *Base) SaveSpan(span trace.Span) {
 func (b *Base) LoadSpanContext(ctx context.Context) context.Context {
 	return trace.ContextWithSpanContext(ctx, b.span)
 }
+
+func (b *Base) Destroy() {}

@@ -140,6 +140,7 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 			ep.messageTotHistogram.Record(ctx, time.Since(msgIn.GetReceiveTime()).Milliseconds())
 
 		loopCleanup:
+			msgIn.Destroy()
 			ep.scaler.notifyTaskCompleted()
 		}
 	}
