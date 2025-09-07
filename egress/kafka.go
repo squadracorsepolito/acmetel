@@ -20,7 +20,7 @@ import (
 // KafkaConfig structs contains the configuration for the Kafka egress stage.
 type KafkaConfig struct {
 	// PoolConfig contains the configuration for the worker pool.
-	PoolConfig *pool.Config
+	PoolConfig *pool.Config `yaml:"pool_config" json:"pool_config"`
 
 	// A list of Kafka brokers to connect to.
 	//

@@ -22,12 +22,18 @@ type Message interface {
 	// It may be different from the receive time.
 	GetTimestamp() time.Time
 
+	// Drop marks the message as dropped.
+	Drop()
+	// IsDropped states whether the message was dropped.
+	IsDropped() bool
+
 	// SaveSpan saves the trace span for the message.
 	SaveSpan(span trace.Span)
 	// LoadSpanContext loads the trace of the message
 	// into the provided context.
 	LoadSpanContext(ctx context.Context) context.Context
 
+	// Destroy cleans up the message.
 	Destroy()
 }
 

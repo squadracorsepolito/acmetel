@@ -11,6 +11,7 @@ import (
 type Base struct {
 	receiveTime time.Time
 	timestamp   time.Time
+	isDropped   bool
 	span        trace.SpanContext
 }
 
@@ -33,6 +34,16 @@ func (b *Base) SetTimestamp(timestamp time.Time) {
 // It may be different from the receive time.
 func (b *Base) GetTimestamp() time.Time {
 	return b.timestamp
+}
+
+// Drop marks the message as dropped.
+func (b *Base) Drop() {
+	b.isDropped = true
+}
+
+// IsDropped states whether the message was dropped.
+func (b *Base) IsDropped() bool {
+	return b.isDropped
 }
 
 // SaveSpan saves the trace span for the message.
