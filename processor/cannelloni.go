@@ -67,6 +67,142 @@ func (cm *CannelloniMessage) GetRawMessages() []CANRawMessage {
 	return cm.Messages[:cm.MessageCount]
 }
 
+///////////////
+//  DECODER  //
+///////////////
+
+type cannelloniDecoder struct{}
+
+func newCannelloniDecoder() *cannelloniDecoder {
+	return &cannelloniDecoder{}
+}
+
+func (cd *cannelloniDecoder) decode(buf []byte) (*cannelloniFrame, error) {
+	if buf == nil {
+		return nil, errors.New("nil buffer")
+	}
+
+	if len(buf) < 5 {
+		return nil, errors.New("not enough data")
+	}
+
+	f := cannelloniFrame{
+		version:        buf[0],
+		opCode:         buf[1],
+		sequenceNumber: buf[2],
+		messageCount:   binary.BigEndian.Uint16(buf[3:5]),
+	}
+
+	f.messages = make([]cannelloniFrameMessage, f.messageCount)
+	pos := 5
+	for i := uint16(0); i < f.messageCount; i++ {
+		n, err := cd.decodeMessage(buf[pos:], &f.messages[i])
+		if err != nil {
+			return nil, err
+		}
+
+		pos += n
+	}
+
+	return &f, nil
+}
+
+func (cd *cannelloniDecoder) decodeMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
+	if len(buf) < 5 {
+		return 0, errors.New("not enough data")
+	}
+
+	n := 5
+
+	msg.canID = binary.BigEndian.Uint32(buf[0:4])
+
+	isCANFD := false
+	tmpDataLen := buf[4]
+	if tmpDataLen|0x80 == 0x80 {
+		isCANFD = true
+	}
+
+	if isCANFD {
+		if len(buf) < 6 {
+			return 0, errors.New("not enough data")
+		}
+
+		msg.dataLen = tmpDataLen & 0x7f
+		msg.canFDFlags = buf[5]
+		n++
+	} else {
+		msg.dataLen = tmpDataLen
+	}
+
+	if len(buf) < n+int(tmpDataLen) {
+		return 0, errors.New("not enough data for message content")
+	}
+
+	msg.data = make([]byte, tmpDataLen)
+
+	copy(msg.data, buf[n:n+int(tmpDataLen)])
+	n += int(msg.dataLen)
+
+	return n, nil
+}
+
+///////////////
+//  ENCODER  //
+///////////////
+
+type cannelloniEncoder struct{}
+
+func newCannelloniEncoder() *cannelloniEncoder {
+	return &cannelloniEncoder{}
+}
+
+func (ce *cannelloniEncoder) encode(frame *cannelloniFrame) []byte {
+	totMsgSize := int(frame.messageCount * 5)
+	for _, msg := range frame.messages {
+		if msg.canFDFlags != 0 {
+			totMsgSize += int(msg.dataLen) + 1
+			continue
+		}
+
+		totMsgSize += int(msg.dataLen)
+	}
+
+	buf := make([]byte, 5+totMsgSize)
+
+	buf[0] = frame.version
+	buf[1] = frame.opCode
+	buf[2] = frame.sequenceNumber
+	binary.BigEndian.PutUint16(buf[3:5], frame.messageCount)
+
+	pos := 5
+	for _, msg := range frame.messages {
+		n := ce.encodeMessage(&msg, buf[pos:])
+		pos += n
+	}
+
+	return buf
+}
+
+func (ce *cannelloniEncoder) encodeMessage(msg *cannelloniFrameMessage, buf []byte) int {
+	n := 5
+
+	binary.BigEndian.PutUint32(buf[0:4], msg.canID)
+
+	buf[4] = msg.dataLen
+
+	if msg.canFDFlags != 0 {
+		buf[4] |= 0x80
+		buf[5] = msg.canFDFlags
+		n++
+	}
+
+	tmpDataLen := int(msg.dataLen)
+	copy(buf[n:n+tmpDataLen], msg.data)
+	n += tmpDataLen
+
+	return n
+}
+
 //////////////
 //  WORKER  //
 //////////////
@@ -88,6 +224,8 @@ type cannelloniFrame struct {
 
 type cannelloniWorker[T msgSer] struct {
 	tel *internal.Telemetry
+
+	decoder *cannelloniDecoder
 }
 
 func (cw *cannelloniWorker[T]) SetTelemetry(tel *internal.Telemetry) {
@@ -95,16 +233,18 @@ func (cw *cannelloniWorker[T]) SetTelemetry(tel *internal.Telemetry) {
 }
 
 func (cw *cannelloniWorker[T]) Init(_ context.Context, _ any) error {
+	cw.decoder = newCannelloniDecoder()
+
 	return nil
 }
 
 func (cw *cannelloniWorker[T]) Handle(ctx context.Context, msgIn T) (*CannelloniMessage, error) {
 	// Extract the span context from the input message
-	ctx, span := cw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+	_, span := cw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
 	defer span.End()
 
 	// Decode the frame
-	f, err := cw.decodeFrame(msgIn.GetBytes())
+	f, err := cw.decoder.decode(msgIn.GetBytes())
 	if err != nil {
 		return nil, err
 	}
@@ -143,74 +283,74 @@ func (cw *cannelloniWorker[T]) Close(_ context.Context) error {
 	return nil
 }
 
-func (cw *cannelloniWorker[T]) decodeFrame(buf []byte) (*cannelloniFrame, error) {
-	if buf == nil {
-		return nil, errors.New("nil buffer")
-	}
+// func (cw *cannelloniWorker[T]) decodeFrame(buf []byte) (*cannelloniFrame, error) {
+// 	if buf == nil {
+// 		return nil, errors.New("nil buffer")
+// 	}
 
-	if len(buf) < 5 {
-		return nil, errors.New("not enough data")
-	}
+// 	if len(buf) < 5 {
+// 		return nil, errors.New("not enough data")
+// 	}
 
-	f := cannelloniFrame{
-		version:        buf[0],
-		opCode:         buf[1],
-		sequenceNumber: buf[2],
-		messageCount:   binary.BigEndian.Uint16(buf[3:5]),
-	}
+// 	f := cannelloniFrame{
+// 		version:        buf[0],
+// 		opCode:         buf[1],
+// 		sequenceNumber: buf[2],
+// 		messageCount:   binary.BigEndian.Uint16(buf[3:5]),
+// 	}
 
-	f.messages = make([]cannelloniFrameMessage, f.messageCount)
-	pos := 5
-	for i := uint16(0); i < f.messageCount; i++ {
-		n, err := cw.decodeFrameMessage(buf[pos:], &f.messages[i])
-		if err != nil {
-			return nil, err
-		}
+// 	f.messages = make([]cannelloniFrameMessage, f.messageCount)
+// 	pos := 5
+// 	for i := uint16(0); i < f.messageCount; i++ {
+// 		n, err := cw.decodeFrameMessage(buf[pos:], &f.messages[i])
+// 		if err != nil {
+// 			return nil, err
+// 		}
 
-		pos += n
-	}
+// 		pos += n
+// 	}
 
-	return &f, nil
-}
+// 	return &f, nil
+// }
 
-func (cw *cannelloniWorker[T]) decodeFrameMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
-	if len(buf) < 5 {
-		return 0, errors.New("not enough data")
-	}
+// func (cw *cannelloniWorker[T]) decodeFrameMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
+// 	if len(buf) < 5 {
+// 		return 0, errors.New("not enough data")
+// 	}
 
-	n := 5
+// 	n := 5
 
-	msg.canID = binary.BigEndian.Uint32(buf[0:4])
+// 	msg.canID = binary.BigEndian.Uint32(buf[0:4])
 
-	isCANFD := false
-	tmpDataLen := buf[4]
-	if tmpDataLen|0x80 == 0x80 {
-		isCANFD = true
-	}
+// 	isCANFD := false
+// 	tmpDataLen := buf[4]
+// 	if tmpDataLen|0x80 == 0x80 {
+// 		isCANFD = true
+// 	}
 
-	if isCANFD {
-		if len(buf) < 6 {
-			return 0, errors.New("not enough data")
-		}
+// 	if isCANFD {
+// 		if len(buf) < 6 {
+// 			return 0, errors.New("not enough data")
+// 		}
 
-		msg.dataLen = tmpDataLen & 0x7f
-		msg.canFDFlags = buf[5]
-		n++
-	} else {
-		msg.dataLen = tmpDataLen
-	}
+// 		msg.dataLen = tmpDataLen & 0x7f
+// 		msg.canFDFlags = buf[5]
+// 		n++
+// 	} else {
+// 		msg.dataLen = tmpDataLen
+// 	}
 
-	if len(buf) < n+int(tmpDataLen) {
-		return 0, errors.New("not enough data for message content")
-	}
+// 	if len(buf) < n+int(tmpDataLen) {
+// 		return 0, errors.New("not enough data for message content")
+// 	}
 
-	msg.data = make([]byte, tmpDataLen)
+// 	msg.data = make([]byte, tmpDataLen)
 
-	copy(msg.data, buf[n:n+int(tmpDataLen)])
-	n += int(msg.dataLen)
+// 	copy(msg.data, buf[n:n+int(tmpDataLen)])
+// 	n += int(msg.dataLen)
 
-	return n, nil
-}
+// 	return n, nil
+// }
 
 /////////////
 //  STAGE  //

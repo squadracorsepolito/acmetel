@@ -4,26 +4,60 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/squadracorsepolito/acmetel/internal/message"
+	"github.com/stretchr/testify/assert"
 )
 
-type dummyMsgIn struct {
-	message.Base
+func Test_cannelloniEncoder(t *testing.T) {
+	assert := assert.New(t)
+
+	encoder := newCannelloniEncoder()
+
+	msgData := []byte{
+		0b11000001,
+		0b11000001,
+	}
+
+	msg := &cannelloniFrame{
+		version:        1,
+		opCode:         1,
+		sequenceNumber: 128,
+		messageCount:   2,
+		messages: []cannelloniFrameMessage{
+			{canID: 1, canFDFlags: 0, dataLen: 2, data: msgData},
+			{canID: 0x0100, canFDFlags: 1, dataLen: 2, data: msgData},
+		},
+	}
+
+	expected := []byte{
+		// Header
+		0x01, 0x01, 0x80,
+		0, 0x02,
+
+		// First message
+		0, 0, 0, 0x01, // can-id
+		0x02, // data len without can-fd flags
+		0b11000001,
+		0b11000001,
+
+		// Second message
+		0, 0, 0x01, 0, // can-id
+		0x82, 1, // data len with can-fd flags (add | 0x80)
+		0b11000001,
+		0b11000001,
+	}
+
+	res := encoder.encode(msg)
+	assert.Equal(expected, res)
 }
 
-func (d *dummyMsgIn) GetBytes() []byte {
-	return nil
-}
-
-func Benchmark_cannelloniWorker_decodeFrame(b *testing.B) {
+func Benchmark_cannelloniDecoder(b *testing.B) {
 	b.ReportAllocs()
 
-	adapter := &cannelloniWorker[*dummyMsgIn]{}
+	decoder := newCannelloniDecoder()
 	frame := getCannelloniEncodedFrame()
 
-	b.ResetTimer()
 	for b.Loop() {
-		_, err := adapter.decodeFrame(frame)
+		_, err := decoder.decode(frame)
 		if err != nil {
 			b.Fatal(err)
 		}
