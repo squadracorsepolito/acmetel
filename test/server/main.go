@@ -58,7 +58,7 @@ func main() {
 	udpStage := ingress.NewUDPStage(udpToCannelloni, udpCfg)
 
 	cannelloniCfg := processor.DefaultCannelloniConfig()
-	cannelloniStage := processor.NewCannelloniStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
+	cannelloniStage := processor.NewCannelloniDecoderStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
 
 	robCfg := processor.DefaultROBConfig()
 	robStage := processor.NewROBStage(cannelloniToROB, robToCAN, robCfg)

@@ -67,6 +67,22 @@ func (cm *CannelloniMessage) GetRawMessages() []CANRawMessage {
 	return cm.Messages[:cm.MessageCount]
 }
 
+var _ message.Serializable = (*CannelloniEncodedMessage)(nil)
+
+type CannelloniEncodedMessage struct {
+	message.Base
+
+	payload []byte
+}
+
+func newCannelloniEncodedMessage() *CannelloniEncodedMessage {
+	return &CannelloniEncodedMessage{}
+}
+
+func (cem *CannelloniEncodedMessage) GetBytes() []byte {
+	return cem.payload
+}
+
 ///////////////
 //  DECODER  //
 ///////////////
@@ -118,7 +134,7 @@ func (cd *cannelloniDecoder) decodeMessage(buf []byte, msg *cannelloniFrameMessa
 
 	isCANFD := false
 	tmpDataLen := buf[4]
-	if tmpDataLen|0x80 == 0x80 {
+	if tmpDataLen&0x80 == 0x80 {
 		isCANFD = true
 	}
 
@@ -127,12 +143,12 @@ func (cd *cannelloniDecoder) decodeMessage(buf []byte, msg *cannelloniFrameMessa
 			return 0, errors.New("not enough data")
 		}
 
-		msg.dataLen = tmpDataLen & 0x7f
+		tmpDataLen &= 0x7f
 		msg.canFDFlags = buf[5]
 		n++
-	} else {
-		msg.dataLen = tmpDataLen
 	}
+
+	msg.dataLen = tmpDataLen
 
 	if len(buf) < n+int(tmpDataLen) {
 		return 0, errors.New("not enough data for message content")
@@ -222,29 +238,29 @@ type cannelloniFrame struct {
 	messages       []cannelloniFrameMessage
 }
 
-type cannelloniWorker[T msgSer] struct {
+type cannelloniDecoderWorker[T msgSer] struct {
 	tel *internal.Telemetry
 
 	decoder *cannelloniDecoder
 }
 
-func (cw *cannelloniWorker[T]) SetTelemetry(tel *internal.Telemetry) {
-	cw.tel = tel
+func (cdw *cannelloniDecoderWorker[T]) SetTelemetry(tel *internal.Telemetry) {
+	cdw.tel = tel
 }
 
-func (cw *cannelloniWorker[T]) Init(_ context.Context, _ any) error {
-	cw.decoder = newCannelloniDecoder()
+func (cdw *cannelloniDecoderWorker[T]) Init(_ context.Context, _ any) error {
+	cdw.decoder = newCannelloniDecoder()
 
 	return nil
 }
 
-func (cw *cannelloniWorker[T]) Handle(ctx context.Context, msgIn T) (*CannelloniMessage, error) {
+func (cdw *cannelloniDecoderWorker[T]) Handle(ctx context.Context, msgIn T) (*CannelloniMessage, error) {
 	// Extract the span context from the input message
-	_, span := cw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+	_, span := cdw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
 	defer span.End()
 
 	// Decode the frame
-	f, err := cw.decoder.decode(msgIn.GetBytes())
+	f, err := cdw.decoder.decode(msgIn.GetBytes())
 	if err != nil {
 		return nil, err
 	}
@@ -279,92 +295,67 @@ func (cw *cannelloniWorker[T]) Handle(ctx context.Context, msgIn T) (*Cannelloni
 	return cannelloniMsg, nil
 }
 
-func (cw *cannelloniWorker[T]) Close(_ context.Context) error {
+func (cdw *cannelloniDecoderWorker[T]) Close(_ context.Context) error {
 	return nil
 }
 
-// func (cw *cannelloniWorker[T]) decodeFrame(buf []byte) (*cannelloniFrame, error) {
-// 	if buf == nil {
-// 		return nil, errors.New("nil buffer")
-// 	}
+type cannelloniEncoderWorker struct {
+	*pool.BaseWorker
 
-// 	if len(buf) < 5 {
-// 		return nil, errors.New("not enough data")
-// 	}
+	encoder *cannelloniEncoder
+}
 
-// 	f := cannelloniFrame{
-// 		version:        buf[0],
-// 		opCode:         buf[1],
-// 		sequenceNumber: buf[2],
-// 		messageCount:   binary.BigEndian.Uint16(buf[3:5]),
-// 	}
+func (cew *cannelloniEncoderWorker) Init(_ context.Context, _ any) error {
+	cew.encoder = newCannelloniEncoder()
 
-// 	f.messages = make([]cannelloniFrameMessage, f.messageCount)
-// 	pos := 5
-// 	for i := uint16(0); i < f.messageCount; i++ {
-// 		n, err := cw.decodeFrameMessage(buf[pos:], &f.messages[i])
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	return nil
+}
 
-// 		pos += n
-// 	}
+func (cew *cannelloniEncoderWorker) Handle(ctx context.Context, msgIn *CannelloniMessage) (*CannelloniEncodedMessage, error) {
+	// Extract the span context from the input message
+	_, span := cew.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+	defer span.End()
 
-// 	return &f, nil
-// }
+	f := &cannelloniFrame{
+		version:        1,
+		opCode:         0,
+		sequenceNumber: msgIn.seqNum,
+		messageCount:   uint16(msgIn.MessageCount),
+		messages:       make([]cannelloniFrameMessage, 0, msgIn.MessageCount),
+	}
 
-// func (cw *cannelloniWorker[T]) decodeFrameMessage(buf []byte, msg *cannelloniFrameMessage) (int, error) {
-// 	if len(buf) < 5 {
-// 		return 0, errors.New("not enough data")
-// 	}
+	for _, msg := range msgIn.Messages {
+		f.messages = append(f.messages, cannelloniFrameMessage{
+			canID:   msg.CANID,
+			dataLen: uint8(msg.DataLen),
+			data:    msg.RawData,
+		})
+	}
 
-// 	n := 5
+	// Encode into a cannelloni message
+	encodedMsg := newCannelloniEncodedMessage()
+	encodedMsg.payload = cew.encoder.encode(f)
 
-// 	msg.canID = binary.BigEndian.Uint32(buf[0:4])
+	return encodedMsg, nil
+}
 
-// 	isCANFD := false
-// 	tmpDataLen := buf[4]
-// 	if tmpDataLen|0x80 == 0x80 {
-// 		isCANFD = true
-// 	}
-
-// 	if isCANFD {
-// 		if len(buf) < 6 {
-// 			return 0, errors.New("not enough data")
-// 		}
-
-// 		msg.dataLen = tmpDataLen & 0x7f
-// 		msg.canFDFlags = buf[5]
-// 		n++
-// 	} else {
-// 		msg.dataLen = tmpDataLen
-// 	}
-
-// 	if len(buf) < n+int(tmpDataLen) {
-// 		return 0, errors.New("not enough data for message content")
-// 	}
-
-// 	msg.data = make([]byte, tmpDataLen)
-
-// 	copy(msg.data, buf[n:n+int(tmpDataLen)])
-// 	n += int(msg.dataLen)
-
-// 	return n, nil
-// }
+func (cew *cannelloniEncoderWorker) Close(_ context.Context) error {
+	return nil
+}
 
 /////////////
 //  STAGE  //
 /////////////
 
-type CannelloniStage[T msgSer] struct {
-	*stage.Processor[T, *CannelloniMessage, cannelloniWorker[T], any, *cannelloniWorker[T]]
+type CannelloniDecoderStage[T msgSer] struct {
+	*stage.Processor[T, *CannelloniMessage, cannelloniDecoderWorker[T], any, *cannelloniDecoderWorker[T]]
 
 	cfg *CannelloniConfig
 }
 
-func NewCannelloniStage[T msgSer](inputConnector conn[T], outputConnector conn[*CannelloniMessage], cfg *CannelloniConfig) *CannelloniStage[T] {
-	return &CannelloniStage[T]{
-		Processor: stage.NewProcessor[T, *CannelloniMessage, cannelloniWorker[T], any](
+func NewCannelloniDecoderStage[T msgSer](inputConnector conn[T], outputConnector conn[*CannelloniMessage], cfg *CannelloniConfig) *CannelloniDecoderStage[T] {
+	return &CannelloniDecoderStage[T]{
+		Processor: stage.NewProcessor[T, *CannelloniMessage, cannelloniDecoderWorker[T], any](
 			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig,
 		),
 
@@ -372,6 +363,29 @@ func NewCannelloniStage[T msgSer](inputConnector conn[T], outputConnector conn[*
 	}
 }
 
-func (cs *CannelloniStage[T]) Init(ctx context.Context) error {
-	return cs.Processor.Init(ctx, nil)
+func (cds *CannelloniDecoderStage[T]) Init(ctx context.Context) error {
+	return cds.Processor.Init(ctx, nil)
+}
+
+type CannelloniEncoderStage struct {
+	*stage.Processor[*CannelloniMessage, *CannelloniEncodedMessage, cannelloniEncoderWorker, any, *cannelloniEncoderWorker]
+
+	cfg *CannelloniConfig
+}
+
+func NewCannelloniEncoderStage(
+	inputConnector conn[*CannelloniMessage], outputConnector conn[*CannelloniEncodedMessage], cfg *CannelloniConfig,
+) *CannelloniEncoderStage {
+
+	return &CannelloniEncoderStage{
+		Processor: stage.NewProcessor[*CannelloniMessage, *CannelloniEncodedMessage, cannelloniEncoderWorker, any](
+			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig,
+		),
+
+		cfg: cfg,
+	}
+}
+
+func (ces *CannelloniEncoderStage) Init(ctx context.Context) error {
+	return ces.Processor.Init(ctx, nil)
 }

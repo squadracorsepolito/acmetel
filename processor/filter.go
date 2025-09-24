@@ -61,7 +61,7 @@ func (fw *filterWorker[T]) initMetrics() {
 
 func (fw *filterWorker[T]) Handle(ctx context.Context, msgIn T) (T, error) {
 	// Extract the span context from the input message
-	ctx, span := fw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "filter message")
+	_, span := fw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "filter message")
 	defer span.End()
 
 	if !fw.filterFn(msgIn) {
