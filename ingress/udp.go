@@ -46,7 +46,7 @@ func DefaultUDPConfig() *UDPConfig {
 
 ///////////////
 //  MESSAGE  //
-//////////////
+///////////////
 
 var _ message.Serializable = (*UDPMessage)(nil)
 
@@ -194,14 +194,6 @@ func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
 	payloadSize := len(buf)
 	udpMsg.PayloadSize = payloadSize
 	copy(udpMsg.Payload, buf)
-
-	// // Extract the payload from the buffer
-	// payloadSize := len(buf)
-	// payload := make([]byte, payloadSize)
-	// copy(payload, buf)
-
-	// // Create the UDP message
-	// udpMsg := newUDPMessage(payload, payloadSize)
 
 	// Set the receive time and the timestamp
 	recvTime := time.Now()
