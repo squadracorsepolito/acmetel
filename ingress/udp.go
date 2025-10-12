@@ -68,17 +68,11 @@ type UDPMessage struct {
 	PayloadSize int
 }
 
-// func newUDPMessage(payload []byte, payloadSize int) *UDPMessage {
-// 	return &UDPMessage{
-// 		Payload:     payload,
-// 		PayloadSize: payloadSize,
-// 	}
-// }
-
 func newUDPMessage() *UDPMessage {
 	return udpMessagePool.Get().(*UDPMessage)
 }
 
+// Destroy cleans up the message.
 func (um *UDPMessage) Destroy() {
 	udpMessagePool.Put(um)
 }
@@ -160,16 +154,11 @@ func (us *udpSource) Run(ctx context.Context, outConnector conn[*UDPMessage]) {
 				select {
 				case <-ctx.Done():
 					return
-
 				default:
-					us.tel.LogError("failed to read connection", err)
 				}
-
-				return
 			}
 
-			us.tel.LogError("server failed to read", err)
-
+			us.tel.LogError("failed to read connection", err)
 			return
 		}
 
@@ -177,8 +166,6 @@ func (us *udpSource) Run(ctx context.Context, outConnector conn[*UDPMessage]) {
 		if err := outConnector.Write(us.handleBuf(ctx, buf)); err != nil {
 			us.tel.LogError("failed to write message to output connector", err)
 		}
-
-		us.receivedMessages.Add(1)
 	}
 }
 
@@ -206,6 +193,7 @@ func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
 
 	// Update metrics
 	us.receivedBytes.Add(int64(payloadSize))
+	us.receivedMessages.Add(1)
 
 	return udpMsg
 }
