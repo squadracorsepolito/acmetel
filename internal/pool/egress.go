@@ -131,15 +131,11 @@ func (ep *Egress[In, W, InitArgs, WPtr]) runWorker(ctx context.Context) {
 			if err := worker.Deliver(ctx, msgIn); err != nil {
 				ep.tel.LogError("failed to deliver message", err, "worker_id", workerID)
 				ep.deliveringErrors.Add(1)
-
-				goto loopCleanup
+			} else {
+				ep.deliveredMessages.Add(1)
 			}
 
-			ep.deliveredMessages.Add(1)
-
 			ep.messageTotHistogram.Record(ctx, time.Since(msgIn.GetReceiveTime()).Milliseconds())
-
-		loopCleanup:
 			msgIn.Destroy()
 			ep.scaler.notifyTaskCompleted()
 		}

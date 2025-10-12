@@ -21,27 +21,32 @@ func main() {
 	ctx, cancelCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancelCtx()
 
-	telemetry.Init(ctx, "kafka-example")
+	telemetry.Init(ctx, "can-client-example")
 
 	tickerToCustom := connector.NewRingBuffer[*ingress.TickerMessage](connectorSize)
-	customToKafka := connector.NewRingBuffer[*egress.KafkaMessage](connectorSize)
+	customToCannelloni := connector.NewRingBuffer[*processor.CannelloniMessage](connectorSize)
+	cannelloniToUDP := connector.NewRingBuffer[*processor.CannelloniEncodedMessage](connectorSize)
 
 	tickerCfg := ingress.DefaultTickerConfig()
-	tickerCfg.Interval = time.Second
+	tickerCfg.Interval = time.Millisecond * 1000
 	tickerStage := ingress.NewTickerStage(tickerToCustom, tickerCfg)
 
 	customCfg := processor.DefaultCustomConfig()
-	customCfg.Name = "ticker_to_kafka"
-	customStage := processor.NewCustomStage(newTickerToKafkaHandler(), tickerToCustom, customToKafka, customCfg)
+	customCfg.Name = "ticker_to_cannelloni"
+	customStage := processor.NewCustomStage(newTickerToCannelloniHandler(), tickerToCustom, customToCannelloni, customCfg)
 
-	kafkaCfg := egress.DefaultKafkaConfig()
-	kafkaStage := egress.NewKafkaStage(customToKafka, kafkaCfg)
+	cannelloniCfg := processor.DefaultCannelloniConfig()
+	cannelloniStage := processor.NewCannelloniEncoderStage(customToCannelloni, cannelloniToUDP, cannelloniCfg)
+
+	udpCfg := egress.DefaultUDPConfig()
+	udpStage := egress.NewUDPStage(cannelloniToUDP, udpCfg)
 
 	pipeline := acmetel.NewPipeline()
 
 	pipeline.AddStage(tickerStage)
 	pipeline.AddStage(customStage)
-	pipeline.AddStage(kafkaStage)
+	pipeline.AddStage(cannelloniStage)
+	pipeline.AddStage(udpStage)
 
 	if err := pipeline.Init(ctx); err != nil {
 		panic(err)

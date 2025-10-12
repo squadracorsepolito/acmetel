@@ -192,9 +192,6 @@ func (cw *canWorker[T]) Handle(ctx context.Context, msgIn T) (*CANMessage, error
 	// Create the CAN message
 	canMsg := newCANMessage()
 
-	canMsg.SetReceiveTime(msgIn.GetReceiveTime())
-	canMsg.SetTimestamp(msgIn.GetTimestamp())
-
 	rawMessages := msgIn.GetRawMessages()
 	rawMsgCount := len(rawMessages)
 

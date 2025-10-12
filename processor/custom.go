@@ -90,10 +90,6 @@ func (cw *customWorker[In, T, Out]) Handle(ctx context.Context, msgIn In) (Out, 
 	var dummyMsgOut T
 	msgOut := Out(&dummyMsgOut)
 
-	// Set the receive time and timestamp
-	msgOut.SetReceiveTime(msgIn.GetReceiveTime())
-	msgOut.SetTimestamp(msgIn.GetTimestamp())
-
 	// Call the provided handler
 	if err := cw.handler.Handle(ctx, msgIn, msgOut); err != nil {
 		return msgOut, err

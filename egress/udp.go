@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
 	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
@@ -40,29 +39,6 @@ func DefaultUDPConfig() *UDPConfig {
 	}
 }
 
-///////////////
-//  MESSAGE  //
-///////////////
-
-// UDPMessage represents a UDP message to be sent.
-type UDPMessage struct {
-	message.Base
-
-	// Payload is the bytes of the UDP payload.
-	Payload []byte
-	// PayloadSize is the size of the UDP payload.
-	PayloadSize int
-}
-
-// NewUDPMessage returns a new UDP message with the given payload.
-// It sets the payload size to the length of the provided payload.
-func NewUDPMessage(payload []byte) *UDPMessage {
-	return &UDPMessage{
-		Payload:     payload,
-		PayloadSize: len(payload),
-	}
-}
-
 //////////////
 //  WORKER  //
 //////////////
@@ -77,7 +53,7 @@ func newUDPWorkerArgs(conn *net.UDPConn) *udpWorkerArgs {
 	}
 }
 
-type udpWorker struct {
+type udpWorker[T msgSer] struct {
 	pool.BaseWorker
 
 	conn *net.UDPConn
@@ -86,11 +62,11 @@ type udpWorker struct {
 	deliveredBytes atomic.Int64
 }
 
-func (uw *udpWorker) initMetrics() {
+func (uw *udpWorker[T]) initMetrics() {
 	uw.Tel.NewCounter("delivered_bytes", func() int64 { return uw.deliveredBytes.Load() })
 }
 
-func (uw *udpWorker) Init(_ context.Context, args *udpWorkerArgs) error {
+func (uw *udpWorker[T]) Init(_ context.Context, args *udpWorkerArgs) error {
 	uw.conn = args.conn
 
 	uw.initMetrics()
@@ -98,25 +74,28 @@ func (uw *udpWorker) Init(_ context.Context, args *udpWorkerArgs) error {
 	return nil
 }
 
-func (uw *udpWorker) Deliver(ctx context.Context, udpMsg *UDPMessage) error {
+func (uw *udpWorker[T]) Deliver(ctx context.Context, udpMsg T) error {
 	// Extract the span context from the input message
 	_, span := uw.Tel.NewTrace(udpMsg.LoadSpanContext(ctx), "deliver UDP message")
 	defer span.End()
 
-	_, err := uw.conn.Write(udpMsg.Payload)
+	payload := udpMsg.GetBytes()
+	payloadSize := len(payload)
+
+	_, err := uw.conn.Write(payload)
 	if err != nil {
 		return err
 	}
 
-	span.SetAttributes(attribute.Int("payload_size", udpMsg.PayloadSize))
+	span.SetAttributes(attribute.Int("payload_size", payloadSize))
 
 	// Update metrics
-	uw.deliveredBytes.Add(int64(udpMsg.PayloadSize))
+	uw.deliveredBytes.Add(int64(payloadSize))
 
 	return nil
 }
 
-func (uw *udpWorker) Close(_ context.Context) error {
+func (uw *udpWorker[T]) Close(_ context.Context) error {
 	return nil
 }
 
@@ -125,8 +104,8 @@ func (uw *udpWorker) Close(_ context.Context) error {
 /////////////
 
 // UDPStage is an egress stage that sends UDP datagrams.
-type UDPStage struct {
-	*stage.Egress[*UDPMessage, udpWorker, *udpWorkerArgs, *udpWorker]
+type UDPStage[T msgSer] struct {
+	*stage.Egress[T, udpWorker[T], *udpWorkerArgs, *udpWorker[T]]
 
 	cfg *UDPConfig
 
@@ -134,9 +113,9 @@ type UDPStage struct {
 }
 
 // NewUDPStage returns a new UDP egress stage.
-func NewUDPStage(inputConnector conn[*UDPMessage], cfg *UDPConfig) *UDPStage {
-	return &UDPStage{
-		Egress: stage.NewEgress[*UDPMessage, udpWorker, *udpWorkerArgs](
+func NewUDPStage[T msgSer](inputConnector conn[T], cfg *UDPConfig) *UDPStage[T] {
+	return &UDPStage[T]{
+		Egress: stage.NewEgress[T, udpWorker[T], *udpWorkerArgs](
 			"udp", inputConnector, cfg.PoolConfig,
 		),
 
@@ -145,7 +124,7 @@ func NewUDPStage(inputConnector conn[*UDPMessage], cfg *UDPConfig) *UDPStage {
 }
 
 // Init initializes the stage.
-func (us *UDPStage) Init(ctx context.Context) error {
+func (us *UDPStage[T]) Init(ctx context.Context) error {
 	// Parse the IP address
 	parsedAddr, err := netip.ParseAddr(us.cfg.IPAddr)
 	if err != nil {

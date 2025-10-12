@@ -57,6 +57,11 @@ func newCannelloniMessage() *CannelloniMessage {
 	}
 }
 
+// SetSequenceNumber sets the sequence number of the cannelloni frame.
+func (cm *CannelloniMessage) SetSequenceNumber(seqNum uint8) {
+	cm.seqNum = seqNum
+}
+
 // GetSequenceNumber returns the sequence number of the cannelloni frame.
 func (cm *CannelloniMessage) GetSequenceNumber() uint64 {
 	return uint64(cm.seqNum)
@@ -67,8 +72,15 @@ func (cm *CannelloniMessage) GetRawMessages() []CANRawMessage {
 	return cm.Messages[:cm.MessageCount]
 }
 
+// AddMessage adds a new CAN message to the cannelloni frame.
+func (cm *CannelloniMessage) AddMessage(msg CANRawMessage) {
+	cm.Messages = append(cm.Messages, msg)
+	cm.MessageCount++
+}
+
 var _ message.Serializable = (*CannelloniEncodedMessage)(nil)
 
+// CannelloniEncodedMessage represents a cannelloni encoded CAN message.
 type CannelloniEncodedMessage struct {
 	message.Base
 
@@ -300,7 +312,7 @@ func (cdw *cannelloniDecoderWorker[T]) Close(_ context.Context) error {
 }
 
 type cannelloniEncoderWorker struct {
-	*pool.BaseWorker
+	pool.BaseWorker
 
 	encoder *cannelloniEncoder
 }

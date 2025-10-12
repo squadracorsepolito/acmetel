@@ -136,6 +136,10 @@ func (p *Processor[W, InitArgs, In, Out, WPtr]) runWorker(ctx context.Context) {
 				goto loopCleanup
 			}
 
+			// Set the receive time and timestamp
+			msgOut.SetReceiveTime(msgIn.GetReceiveTime())
+			msgOut.SetTimestamp(msgIn.GetTimestamp())
+
 			p.handledMessages.Add(1)
 
 			if err := p.fanIn.addTask(msgOut); err != nil {
