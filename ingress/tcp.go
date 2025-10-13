@@ -13,30 +13,76 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
+	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
-	tcpBufferSize = 4096
+	tcpBufSize = 4096
 )
 
 //////////////
 //  CONFIG  //
 //////////////
 
+// TCPConfig structs contains the configuration for the TCP ingress stage.
+type TCPConfig struct {
+	// IPAddr is the IP address of the server to listen on.
+	//
+	// Default: 127.0.0.1
+	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+
+	// Port is the port to listen on.
+	//
+	// Default: 20_000
+	Port uint16 `yaml:"port" json:"port"`
+
+	// Delimiter is the delimiter to use to separate messages.
+	//
+	// Default: \n
+	Delimiter []byte `yaml:"delimiter" json:"delimiter"`
+
+	// ReadTimeout is the timeout for reading from a connection.
+	//
+	// Default: 10s
+	ReadTimeout time.Duration `yaml:"timeout" json:"timeout"`
+}
+
+// DefaultTCPConfig returns a default TCPConfig.
+func DefaultTCPConfig() TCPConfig {
+	return TCPConfig{
+		IPAddr:      "127.0.0.1",
+		Port:        20_000,
+		Delimiter:   []byte("\n"),
+		ReadTimeout: 10 * time.Second,
+	}
+}
+
 ///////////////
 //  MESSAGE  //
 ///////////////
 
+var _ message.Serializable = (*TCPMessage)(nil)
+
+// TCPMessage represents a TCP message.
 type TCPMessage struct {
 	message.Base
 
-	Payload     []byte
-	PayloadSize int
+	// RemoteAddr is the remote address of the connection.
+	RemoteAddr string
+	// Message is the message payload.
+	Message []byte
+	// MessageSize is the size of the message payload.
+	MessageSize int
 }
 
 func newTCPMessage() *TCPMessage {
 	return &TCPMessage{}
+}
+
+// GetBytes returns the bytes of the TCP message.
+func (tm *TCPMessage) GetBytes() []byte {
+	return tm.Message
 }
 
 //////////////
@@ -69,7 +115,7 @@ func newTCPSource() *tcpSource {
 
 		bufPool: sync.Pool{
 			New: func() any {
-				buf := make([]byte, tcpBufferSize)
+				buf := make([]byte, tcpBufSize)
 				return buf
 			},
 		},
@@ -226,7 +272,9 @@ func (ts *tcpSource) handleConn(ctx context.Context, conn net.Conn, outConnector
 			msg := acc[:idx]
 
 			// Handle the message and send the result to the output connector
-			if err := outConnector.Write(ts.handleMessage(ctx, msg)); err != nil {
+			outMsg := ts.handleMessage(ctx, msg)
+			outMsg.RemoteAddr = conn.RemoteAddr().String()
+			if err := outConnector.Write(outMsg); err != nil {
 				ts.tel.LogError("failed to write message to output connector", err)
 			}
 
@@ -255,10 +303,10 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 	tcpMsg := newTCPMessage()
 
 	// Extract the payload from the buffer
-	payloadSize := len(msg)
-	tcpMsg.PayloadSize = payloadSize
-	tcpMsg.Payload = make([]byte, payloadSize)
-	copy(tcpMsg.Payload, msg)
+	msgSize := len(msg)
+	tcpMsg.MessageSize = msgSize
+	tcpMsg.Message = make([]byte, msgSize)
+	copy(tcpMsg.Message, msg)
 
 	// Set the receive time and the timestamp
 	recvTime := time.Now()
@@ -266,11 +314,11 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 	tcpMsg.SetTimestamp(recvTime)
 
 	// Save the span into the message
-	span.SetAttributes(attribute.Int("payload_size", payloadSize))
+	span.SetAttributes(attribute.Int("payload_size", msgSize))
 	tcpMsg.SaveSpan(span)
 
 	// Update metrics
-	ts.receivedBytes.Add(int64(payloadSize))
+	ts.receivedBytes.Add(int64(msgSize))
 	ts.receivedMessages.Add(1)
 
 	return tcpMsg
@@ -279,3 +327,34 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 /////////////
 //  STAGE  //
 /////////////
+
+// TCPStage is an ingress stage that reads TCP streams and extracts messages.
+type TCPStage struct {
+	*stage.Ingress[*TCPMessage]
+
+	cfg *TCPConfig
+
+	source *tcpSource
+}
+
+// NewTCPStage returns a new TCP stage.
+func NewTCPStage(outputConnector conn[*TCPMessage], cfg *TCPConfig) *TCPStage {
+	source := newTCPSource()
+
+	return &TCPStage{
+		Ingress: stage.NewIngress("tcp", source, outputConnector),
+
+		cfg: cfg,
+
+		source: source,
+	}
+}
+
+// Init initializes the stage.
+func (ts *TCPStage) Init(ctx context.Context) error {
+	if err := ts.source.init(ts.cfg.IPAddr, ts.cfg.Port, ts.cfg.Delimiter, ts.cfg.ReadTimeout); err != nil {
+		return err
+	}
+
+	return ts.Ingress.Init(ctx)
+}
