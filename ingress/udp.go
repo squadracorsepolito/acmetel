@@ -27,7 +27,7 @@ const (
 type UDPConfig struct {
 	// IPAddr is the IP address to listen on.
 	//
-	// Default: 127.0.0.1
+	// Default: 0.0.0.0
 	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
 
 	// Port is the port to listen on.
@@ -39,7 +39,7 @@ type UDPConfig struct {
 // DefaultUDPConfig returns the default configuration for the UDP stage.
 func DefaultUDPConfig() *UDPConfig {
 	return &UDPConfig{
-		IPAddr: "127.0.0.1",
+		IPAddr: "0.0.0.0",
 		Port:   20_000,
 	}
 }

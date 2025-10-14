@@ -82,7 +82,7 @@ func (uw *udpWorker[T]) Deliver(ctx context.Context, udpMsg T) error {
 	payload := udpMsg.GetBytes()
 	payloadSize := len(payload)
 
-	_, err := uw.conn.Write(payload)
+	deliveredBytes, err := uw.conn.Write(payload)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func (uw *udpWorker[T]) Deliver(ctx context.Context, udpMsg T) error {
 	span.SetAttributes(attribute.Int("payload_size", payloadSize))
 
 	// Update metrics
-	uw.deliveredBytes.Add(int64(payloadSize))
+	uw.deliveredBytes.Add(int64(deliveredBytes))
 
 	return nil
 }

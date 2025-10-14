@@ -29,7 +29,7 @@ const (
 type TCPConfig struct {
 	// IPAddr is the IP address of the server to listen on.
 	//
-	// Default: 127.0.0.1
+	// Default: 0.0.0.0
 	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
 
 	// Port is the port to listen on.
@@ -39,19 +39,19 @@ type TCPConfig struct {
 
 	// Delimiter is the delimiter to use to separate messages.
 	//
-	// Default: \n
+	// Default: "\n"
 	Delimiter []byte `yaml:"delimiter" json:"delimiter"`
 
 	// ReadTimeout is the timeout for reading from a connection.
 	//
 	// Default: 10s
-	ReadTimeout time.Duration `yaml:"timeout" json:"timeout"`
+	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
 }
 
 // DefaultTCPConfig returns a default TCPConfig.
 func DefaultTCPConfig() TCPConfig {
 	return TCPConfig{
-		IPAddr:      "127.0.0.1",
+		IPAddr:      "0.0.0.0",
 		Port:        20_000,
 		Delimiter:   []byte("\n"),
 		ReadTimeout: 10 * time.Second,
@@ -101,7 +101,7 @@ type tcpSource struct {
 	// Configs
 	delimiter    []byte
 	delimiterLen int
-	timeout      time.Duration
+	readTimeout  time.Duration
 
 	// Metrics
 	openConnections  atomic.Int64
@@ -126,7 +126,7 @@ func (ts *tcpSource) SetTelemetry(tel *internal.Telemetry) {
 	ts.tel = tel
 }
 
-func (ts *tcpSource) init(ipAddr string, port uint16, delimiter []byte, timeout time.Duration) error {
+func (ts *tcpSource) init(ipAddr string, port uint16, delimiter []byte, readTimeout time.Duration) error {
 	parsedAddr, err := netip.ParseAddr(ipAddr)
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func (ts *tcpSource) init(ipAddr string, port uint16, delimiter []byte, timeout 
 
 	ts.delimiter = delimiter
 	ts.delimiterLen = len(delimiter)
-	ts.timeout = timeout
+	ts.readTimeout = readTimeout
 
 	ts.initMetrics()
 
@@ -224,7 +224,7 @@ func (ts *tcpSource) handleConn(ctx context.Context, conn net.Conn, outConnector
 		}
 
 		// Set the read deadline
-		conn.SetReadDeadline(time.Now().Add(ts.timeout))
+		conn.SetReadDeadline(time.Now().Add(ts.readTimeout))
 
 		// Read the TCP stream
 		n, err := conn.Read(buf)
@@ -328,7 +328,7 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 //  STAGE  //
 /////////////
 
-// TCPStage is an ingress stage that reads TCP streams and extracts messages.
+// TCPStage is an ingress stage that reads TCP connections and extracts messages.
 type TCPStage struct {
 	*stage.Ingress[*TCPMessage]
 
