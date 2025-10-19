@@ -30,13 +30,6 @@ type TCPConfig struct {
 	// Default: 20_000
 	Port uint16 `yaml:"port" json:"port"`
 
-	// Delimiter is the byte sequence used to separate messages
-	// within a single TCP connection (stream). It is appended
-	// at the end of each message automatically.
-	//
-	// Default: "\n"
-	Delimiter []byte `yaml:"delimiter" json:"delimiter"`
-
 	// WriteTimeout is the timeout for writing messages to the TCP connection.
 	//
 	// Default: 10s
@@ -49,7 +42,6 @@ func DefaultTCPConfig() *TCPConfig {
 		PoolConfig:   pool.DefaultConfig(),
 		IPAddr:       "127.0.0.1",
 		Port:         20_000,
-		Delimiter:    []byte("\n"),
 		WriteTimeout: 10 * time.Second,
 	}
 }
@@ -60,14 +52,12 @@ func DefaultTCPConfig() *TCPConfig {
 
 type tcpWorkerArgs struct {
 	conn         *net.TCPConn
-	delimiter    []byte
 	writeTimeout time.Duration
 }
 
-func newTCPWorkerArgs(conn *net.TCPConn, delimiter []byte, writeTimeout time.Duration) *tcpWorkerArgs {
+func newTCPWorkerArgs(conn *net.TCPConn, writeTimeout time.Duration) *tcpWorkerArgs {
 	return &tcpWorkerArgs{
 		conn:         conn,
-		delimiter:    delimiter,
 		writeTimeout: writeTimeout,
 	}
 }
@@ -75,10 +65,7 @@ func newTCPWorkerArgs(conn *net.TCPConn, delimiter []byte, writeTimeout time.Dur
 type tcpWorker[T msgSer] struct {
 	pool.BaseWorker
 
-	conn *net.TCPConn
-
-	delimiter    []byte
-	delimiterLen int
+	conn         *net.TCPConn
 	writeTimeout time.Duration
 
 	// Metrics
@@ -87,9 +74,6 @@ type tcpWorker[T msgSer] struct {
 
 func (tw *tcpWorker[T]) Init(_ context.Context, args *tcpWorkerArgs) error {
 	tw.conn = args.conn
-
-	tw.delimiter = args.delimiter
-	tw.delimiterLen = len(args.delimiter)
 	tw.writeTimeout = args.writeTimeout
 
 	tw.initMetrics()
@@ -112,16 +96,12 @@ func (tw *tcpWorker[T]) Deliver(ctx context.Context, msg T) error {
 	}
 
 	tcpMsg := msg.GetBytes()
-	tcpMsgSize := len(tcpMsg)
-	tcpMsg = append(tcpMsg, tw.delimiter...)
-
 	deliveredBytes, err := tw.conn.Write(tcpMsg)
 	if err != nil {
 		return err
 	}
 
-	span.SetAttributes(attribute.Int("message_size", tcpMsgSize))
-	span.SetAttributes(attribute.Int("delimiter_len", tw.delimiterLen))
+	span.SetAttributes(attribute.Int("message_size", len(tcpMsg)))
 
 	// Update metrics
 	tw.deliveredBytes.Add(int64(deliveredBytes))
@@ -174,5 +154,5 @@ func (ts *TCPStage[T]) Init(ctx context.Context) error {
 
 	ts.conn = conn
 
-	return ts.Egress.Init(ctx, newTCPWorkerArgs(ts.conn, ts.cfg.Delimiter, ts.cfg.WriteTimeout))
+	return ts.Egress.Init(ctx, newTCPWorkerArgs(ts.conn, ts.cfg.WriteTimeout))
 }
