@@ -57,23 +57,23 @@ func main() {
 	udpCfg := ingress.DefaultUDPConfig()
 	udpStage := ingress.NewUDPStage(udpToCannelloni, udpCfg)
 
-	cannelloniCfg := processor.DefaultCannelloniConfig()
+	cannelloniCfg := processor.DefaultCannelloniConfig(acmetel.StageRunningModePool)
 	cannelloniStage := processor.NewCannelloniDecoderStage(udpToCannelloni, cannelloniToROB, cannelloniCfg)
 
 	robCfg := processor.DefaultROBConfig()
 	robStage := processor.NewROBStage(cannelloniToROB, robToCAN, robCfg)
 
-	canCfg := processor.DefaultCANConfig()
+	canCfg := processor.DefaultCANConfig(acmetel.StageRunningModePool)
 	canCfg.Messages = getMessages()
 	canStage := processor.NewCANStage(robToCAN, canToCustom, canCfg)
 
-	customCfg := processor.DefaultCustomConfig()
+	customCfg := processor.DefaultCustomConfig(acmetel.StageRunningModePool)
 	customCfg.Name = "can_to_questdb"
-	customCfg.PoolConfig.MinWorkers = customCfg.PoolConfig.InitialWorkers
+	customCfg.Stage.Pool.MinWorkers = customCfg.Stage.Pool.InitialWorkers
 	customStage := processor.NewCustomStage(newCANToQuestDBHandler(), canToCustom, customToQuestDB, customCfg)
 
-	questDBCfg := egress.DefaultQuestDBConfig()
-	questDBCfg.PoolConfig.MinWorkers = questDBCfg.PoolConfig.InitialWorkers
+	questDBCfg := egress.DefaultQuestDBConfig(acmetel.StageRunningModePool)
+	questDBCfg.Stage.Pool.MinWorkers = questDBCfg.Stage.Pool.InitialWorkers
 	questDBStage := egress.NewQuestDBStage(customToQuestDB, questDBCfg)
 
 	pipeline := acmetel.NewPipeline()

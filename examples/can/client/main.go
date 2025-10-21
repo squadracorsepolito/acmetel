@@ -28,17 +28,17 @@ func main() {
 	cannelloniToUDP := connector.NewRingBuffer[*processor.CannelloniEncodedMessage](connectorSize)
 
 	tickerCfg := ingress.DefaultTickerConfig()
-	tickerCfg.Interval = time.Millisecond * 1000
+	tickerCfg.Interval = time.Millisecond * 10
 	tickerStage := ingress.NewTickerStage(tickerToCustom, tickerCfg)
 
-	customCfg := processor.DefaultCustomConfig()
+	customCfg := processor.DefaultCustomConfig(acmetel.StageRunningModeSingle)
 	customCfg.Name = "ticker_to_cannelloni"
 	customStage := processor.NewCustomStage(newTickerToCannelloniHandler(), tickerToCustom, customToCannelloni, customCfg)
 
-	cannelloniCfg := processor.DefaultCannelloniConfig()
+	cannelloniCfg := processor.DefaultCannelloniConfig(acmetel.StageRunningModeSingle)
 	cannelloniStage := processor.NewCannelloniEncoderStage(customToCannelloni, cannelloniToUDP, cannelloniCfg)
 
-	udpCfg := egress.DefaultUDPConfig()
+	udpCfg := egress.DefaultUDPConfig(acmetel.StageRunningModeSingle)
 	udpStage := egress.NewUDPStage(cannelloniToUDP, udpCfg)
 
 	pipeline := acmetel.NewPipeline()

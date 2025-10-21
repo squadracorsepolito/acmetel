@@ -1,4 +1,4 @@
-// Package pool contains the worker pool implementations for the different kind of stages.
+// Package pool contains the inner components for implementing a worker pool.
 package pool
 
 import (
@@ -74,17 +74,5 @@ func DefaultConfig() *Config {
 		ScaleDownFactor:     0.1,
 		ScaleDownBackoff:    1.5,
 		AutoScaleInterval:   3 * time.Second,
-	}
-}
-
-func (cfg *Config) toScaler() *scalerCfg {
-	return &scalerCfg{
-		enabled:             cfg.AutoScaleEnabled,
-		maxWorkers:          cfg.MaxWorkers,
-		minWorkers:          cfg.MinWorkers,
-		queueDepthThreshold: float64(cfg.QueueDepthPerWorker),
-		scaleDownFactor:     cfg.ScaleDownFactor,
-		scaleDownBackoff:    cfg.ScaleDownBackoff,
-		interval:            cfg.AutoScaleInterval,
 	}
 }

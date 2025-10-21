@@ -7,7 +7,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"github.com/squadracorsepolito/acmetel/internal/telemetry"
 
 	"github.com/segmentio/kafka-go"
@@ -19,8 +19,7 @@ import (
 
 // KafkaConfig structs contains the configuration for the Kafka egress stage.
 type KafkaConfig struct {
-	// PoolConfig contains the configuration for the worker pool.
-	PoolConfig *pool.Config `yaml:"pool_config" json:"pool_config"`
+	Stage *stageCommon.Config
 
 	// A list of Kafka brokers to connect to.
 	//
@@ -108,9 +107,9 @@ type KafkaConfig struct {
 }
 
 // DefaultKafkaConfig returns a default Kafka egress config.
-func DefaultKafkaConfig() *KafkaConfig {
+func DefaultKafkaConfig(runningMode stageCommon.RunningMode) *KafkaConfig {
 	return &KafkaConfig{
-		PoolConfig: pool.DefaultConfig(),
+		Stage: stageCommon.DefaultConfig(runningMode),
 
 		Brokers:                []string{"localhost:9092"},
 		Balancer:               &kafka.RoundRobin{},
@@ -169,6 +168,12 @@ func newKafkaWorkerArgs(writer *kafka.Writer) *kafkaWorkerArgs {
 	}
 }
 
+func newKafkaWorkerInstMaker() workerInstanceMaker[*kafkaWorkerArgs, *KafkaMessage] {
+	return func() workerInstance[*kafkaWorkerArgs, *KafkaMessage] {
+		return &kafkaWorker{}
+	}
+}
+
 type kafkaWorker struct {
 	pool.BaseWorker
 
@@ -217,7 +222,7 @@ func (kw *kafkaWorker) Close(_ context.Context) error { return nil }
 
 // KafkaStage is an egress stage that writes messages to Kafka.
 type KafkaStage struct {
-	*stage.Egress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs, *kafkaWorker]
+	stage[*kafkaWorkerArgs, *KafkaMessage]
 
 	cfg *KafkaConfig
 
@@ -227,7 +232,7 @@ type KafkaStage struct {
 // NewKafkaStage returns a new Kafka egress stage.
 func NewKafkaStage(inputConnector connector.Connector[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
 	return &KafkaStage{
-		Egress: stage.NewEgress[*KafkaMessage, kafkaWorker, *kafkaWorkerArgs]("kafka", inputConnector, cfg.PoolConfig),
+		stage: newStage("kafka", inputConnector, newKafkaWorkerInstMaker(), cfg.Stage),
 
 		cfg: cfg,
 	}
@@ -253,14 +258,14 @@ func (ks *KafkaStage) Init(ctx context.Context) error {
 		AllowAutoTopicCreation: ks.cfg.AllowAutoTopicCreation,
 	}
 
-	return ks.Egress.Init(ctx, newKafkaWorkerArgs(ks.writer))
+	return ks.stage.Init(ctx, newKafkaWorkerArgs(ks.writer))
 }
 
 // Close closes the stage.
 func (ks *KafkaStage) Close() {
-	ks.Egress.Close()
+	ks.stage.Close()
 
 	if err := ks.writer.Close(); err != nil {
-		ks.Tel.LogError("failed to close writer", err)
+		ks.Tel().LogError("failed to close writer", err)
 	}
 }

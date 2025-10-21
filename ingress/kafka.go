@@ -10,7 +10,6 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"github.com/squadracorsepolito/acmetel/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -230,7 +229,7 @@ func newKafkaMessage() *KafkaMessage {
 //  SOURCE  //
 //////////////
 
-var _ stage.Source[*KafkaMessage] = (*kafkaSource)(nil)
+var _ source[*KafkaMessage] = (*kafkaSource)(nil)
 
 type kafkaSource struct {
 	tel *internal.Telemetry
@@ -329,7 +328,7 @@ func (ks *kafkaSource) close() {
 
 // KafkaStage is an ingress stage that reads messages from Kafka.
 type KafkaStage struct {
-	*stage.Ingress[*KafkaMessage]
+	*stage[*KafkaMessage]
 
 	cfg *KafkaConfig
 
@@ -341,7 +340,7 @@ func NewKafkaStage(outConnector connector.Connector[*KafkaMessage], cfg *KafkaCo
 	source := newKafkaSource()
 
 	return &KafkaStage{
-		Ingress: stage.NewIngress("kafka", source, outConnector),
+		stage: newStage("kafka", source, outConnector),
 
 		cfg: cfg,
 
@@ -377,11 +376,11 @@ func (ks *KafkaStage) Init(ctx context.Context) error {
 		MaxAttempts:            ks.cfg.MaxAttempts,
 	})
 
-	return ks.Ingress.Init(ctx)
+	return ks.stage.Init(ctx)
 }
 
 // Close closes the stage.
 func (ks *KafkaStage) Close() {
-	ks.Ingress.Close()
+	ks.stage.Close()
 	ks.source.close()
 }

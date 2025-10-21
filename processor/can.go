@@ -2,13 +2,14 @@ package processor
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/squadracorsepolito/acmelib"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -17,14 +18,14 @@ import (
 //////////////
 
 type CANConfig struct {
-	PoolConfig *pool.Config
+	Stage *stageCommon.Config
 
 	Messages []*acmelib.Message
 }
 
-func DefaultCANConfig() *CANConfig {
+func DefaultCANConfig(runningMode stageCommon.RunningMode) *CANConfig {
 	return &CANConfig{
-		PoolConfig: pool.DefaultConfig(),
+		Stage: stageCommon.DefaultConfig(runningMode),
 
 		Messages: []*acmelib.Message{},
 	}
@@ -143,9 +144,9 @@ func (cd *canDecoder) decode(ctx context.Context, canID uint32, data []byte) []*
 	return fn(data)
 }
 
-//////////////
-//  WORKER  //
-//////////////
+////////////////////////
+//  WORKER ARGUMENTS  //
+////////////////////////
 
 type canWorkerArgs struct {
 	decoder *canDecoder
@@ -157,36 +158,69 @@ func newCANWorkerArgs(decoder *canDecoder) *canWorkerArgs {
 	}
 }
 
-type canWorker[T CANMessageCarrier] struct {
-	tel *internal.Telemetry
+//////////////////////
+//  WORKER METRICS  //
+//////////////////////
 
-	decoder *canDecoder
+type canWorkerMetrics struct {
+	once sync.Once
 
-	// Metrics
 	canMessages atomic.Int64
 	canSignals  atomic.Int64
 }
 
-func (cw *canWorker[T]) SetTelemetry(tel *internal.Telemetry) {
-	cw.tel = tel
+var canWorkerMetricsInst = &canWorkerMetrics{}
+
+func (cwm *canWorkerMetrics) init(tel *internal.Telemetry) {
+	cwm.once.Do(func() {
+		cwm.initMetrics(tel)
+	})
+}
+
+func (cwm *canWorkerMetrics) initMetrics(tel *internal.Telemetry) {
+	tel.NewCounter("can_messages", func() int64 { return cwm.canMessages.Load() })
+	tel.NewCounter("can_signals", func() int64 { return cwm.canSignals.Load() })
+}
+
+func (cwm *canWorkerMetrics) addCANMessages(amount int) {
+	cwm.canMessages.Add(int64(amount))
+}
+
+func (cwm *canWorkerMetrics) addCANSignals(amount int) {
+	cwm.canSignals.Add(int64(amount))
+}
+
+/////////////////////////////
+//  WORKER IMPLEMENTATION  //
+/////////////////////////////
+
+type canWorker[T CANMessageCarrier] struct {
+	pool.BaseWorker
+
+	decoder *canDecoder
+
+	metrics *canWorkerMetrics
+}
+
+func newCANWorkerInstMaker[T CANMessageCarrier]() workerInstanceMaker[*canWorkerArgs, T, *CANMessage] {
+	return func() workerInstance[*canWorkerArgs, T, *CANMessage] {
+		return &canWorker[T]{
+			metrics: canWorkerMetricsInst,
+		}
+	}
 }
 
 func (cw *canWorker[T]) Init(_ context.Context, args *canWorkerArgs) error {
 	cw.decoder = args.decoder
 
-	cw.initMetrics()
+	cw.metrics.init(cw.Tel)
 
 	return nil
 }
 
-func (cw *canWorker[T]) initMetrics() {
-	cw.tel.NewCounter("can_messages", func() int64 { return cw.canMessages.Load() })
-	cw.tel.NewCounter("can_signals", func() int64 { return cw.canSignals.Load() })
-}
-
 func (cw *canWorker[T]) Handle(ctx context.Context, msgIn T) (*CANMessage, error) {
 	// Extract the span context from the input message
-	ctx, span := cw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle CAN message batch")
+	ctx, span := cw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle CAN message batch")
 	defer span.End()
 
 	// Create the CAN message
@@ -238,8 +272,8 @@ func (cw *canWorker[T]) Handle(ctx context.Context, msgIn T) (*CANMessage, error
 	canMsg.SaveSpan(span)
 
 	// Update metrics
-	cw.canMessages.Add(int64(rawMsgCount))
-	cw.canSignals.Add(int64(canMsg.SignalCount))
+	cw.metrics.addCANMessages(rawMsgCount)
+	cw.metrics.addCANSignals(canMsg.SignalCount)
 
 	return canMsg, nil
 }
@@ -253,14 +287,16 @@ func (cw *canWorker[T]) Close(_ context.Context) error {
 /////////////
 
 type CANStage[T CANMessageCarrier] struct {
-	*stage.Processor[T, *CANMessage, canWorker[T], *canWorkerArgs, *canWorker[T]]
+	stage[*canWorkerArgs, T, *CANMessage]
 
 	cfg *CANConfig
 }
 
 func NewCANStage[T CANMessageCarrier](inputConnector conn[T], outputConnector conn[*CANMessage], cfg *CANConfig) *CANStage[T] {
 	return &CANStage[T]{
-		Processor: stage.NewProcessor[T, *CANMessage, canWorker[T], *canWorkerArgs]("can", inputConnector, outputConnector, cfg.PoolConfig),
+		stage: newStage(
+			"can", inputConnector, outputConnector, newCANWorkerInstMaker[T](), cfg.Stage,
+		),
 
 		cfg: cfg,
 	}
@@ -269,5 +305,5 @@ func NewCANStage[T CANMessageCarrier](inputConnector conn[T], outputConnector co
 func (cs *CANStage[T]) Init(ctx context.Context) error {
 	decoder := newCANDecoder(cs.cfg.Messages)
 
-	return cs.Processor.Init(ctx, newCANWorkerArgs(decoder))
+	return cs.stage.Init(ctx, newCANWorkerArgs(decoder))
 }

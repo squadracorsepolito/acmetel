@@ -5,10 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -16,13 +15,17 @@ import (
 //  CONFIG  //
 //////////////
 
+// CannelloniConfig structs contains the configuration for
+// a cannelloni (encoder/decoder) stage.
 type CannelloniConfig struct {
-	PoolConfig *pool.Config
+	Stage *stageCommon.Config
 }
 
-func DefaultCannelloniConfig() *CannelloniConfig {
+// DefaultCannelloniConfig returns the default configuration for
+// a cannelloni (encoder/decoder) stage.
+func DefaultCannelloniConfig(runningMode stageCommon.RunningMode) *CannelloniConfig {
 	return &CannelloniConfig{
-		PoolConfig: pool.DefaultConfig(),
+		Stage: stageCommon.DefaultConfig(runningMode),
 	}
 }
 
@@ -91,6 +94,7 @@ func newCannelloniEncodedMessage() *CannelloniEncodedMessage {
 	return &CannelloniEncodedMessage{}
 }
 
+// GetBytes returns the encoded bytes of a cannelloni message.
 func (cem *CannelloniEncodedMessage) GetBytes() []byte {
 	return cem.payload
 }
@@ -251,13 +255,15 @@ type cannelloniFrame struct {
 }
 
 type cannelloniDecoderWorker[T msgSer] struct {
-	tel *internal.Telemetry
+	pool.BaseWorker
 
 	decoder *cannelloniDecoder
 }
 
-func (cdw *cannelloniDecoderWorker[T]) SetTelemetry(tel *internal.Telemetry) {
-	cdw.tel = tel
+func newCannelloniDecoderWorkerInstMaker[T msgSer]() workerInstanceMaker[any, T, *CannelloniMessage] {
+	return func() workerInstance[any, T, *CannelloniMessage] {
+		return &cannelloniDecoderWorker[T]{}
+	}
 }
 
 func (cdw *cannelloniDecoderWorker[T]) Init(_ context.Context, _ any) error {
@@ -268,7 +274,7 @@ func (cdw *cannelloniDecoderWorker[T]) Init(_ context.Context, _ any) error {
 
 func (cdw *cannelloniDecoderWorker[T]) Handle(ctx context.Context, msgIn T) (*CannelloniMessage, error) {
 	// Extract the span context from the input message
-	_, span := cdw.tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+	_, span := cdw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
 	defer span.End()
 
 	// Decode the frame
@@ -317,6 +323,12 @@ type cannelloniEncoderWorker struct {
 	encoder *cannelloniEncoder
 }
 
+func newCannelloniEncoderWorkerInstMaker() workerInstanceMaker[any, *CannelloniMessage, *CannelloniEncodedMessage] {
+	return func() workerInstance[any, *CannelloniMessage, *CannelloniEncodedMessage] {
+		return &cannelloniEncoderWorker{}
+	}
+}
+
 func (cew *cannelloniEncoderWorker) Init(_ context.Context, _ any) error {
 	cew.encoder = newCannelloniEncoder()
 
@@ -359,45 +371,53 @@ func (cew *cannelloniEncoderWorker) Close(_ context.Context) error {
 //  STAGE  //
 /////////////
 
+// CannelloniDecoderStage is a processor stage that decodes
+// cannelloni messages into CAN messages.
 type CannelloniDecoderStage[T msgSer] struct {
-	*stage.Processor[T, *CannelloniMessage, cannelloniDecoderWorker[T], any, *cannelloniDecoderWorker[T]]
+	stage[any, T, *CannelloniMessage]
 
 	cfg *CannelloniConfig
 }
 
+// NewCannelloniDecoderStage returns a new cannelloni decoder processor stage.
 func NewCannelloniDecoderStage[T msgSer](inputConnector conn[T], outputConnector conn[*CannelloniMessage], cfg *CannelloniConfig) *CannelloniDecoderStage[T] {
 	return &CannelloniDecoderStage[T]{
-		Processor: stage.NewProcessor[T, *CannelloniMessage, cannelloniDecoderWorker[T], any](
-			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig,
+		stage: newStage(
+			"cannelloni", inputConnector, outputConnector, newCannelloniDecoderWorkerInstMaker[T](), cfg.Stage,
 		),
 
 		cfg: cfg,
 	}
 }
 
+// Init initializes the stage.
 func (cds *CannelloniDecoderStage[T]) Init(ctx context.Context) error {
-	return cds.Processor.Init(ctx, nil)
+	return cds.stage.Init(ctx, nil)
 }
 
+// CannelloniEncoderStage is a processor stage that encodes
+// CAN messages into cannelloni messages.
 type CannelloniEncoderStage struct {
-	*stage.Processor[*CannelloniMessage, *CannelloniEncodedMessage, cannelloniEncoderWorker, any, *cannelloniEncoderWorker]
+	stage[any, *CannelloniMessage, *CannelloniEncodedMessage]
 
 	cfg *CannelloniConfig
 }
 
+// NewCannelloniEncoderStage returns a new cannelloni encoder processor stage.
 func NewCannelloniEncoderStage(
 	inputConnector conn[*CannelloniMessage], outputConnector conn[*CannelloniEncodedMessage], cfg *CannelloniConfig,
 ) *CannelloniEncoderStage {
 
 	return &CannelloniEncoderStage{
-		Processor: stage.NewProcessor[*CannelloniMessage, *CannelloniEncodedMessage, cannelloniEncoderWorker, any](
-			"cannelloni", inputConnector, outputConnector, cfg.PoolConfig,
+		stage: newStage(
+			"cannelloni", inputConnector, outputConnector, newCannelloniEncoderWorkerInstMaker(), cfg.Stage,
 		),
 
 		cfg: cfg,
 	}
 }
 
+// Init initializes the stage.
 func (ces *CannelloniEncoderStage) Init(ctx context.Context) error {
-	return ces.Processor.Init(ctx, nil)
+	return ces.stage.Init(ctx, nil)
 }

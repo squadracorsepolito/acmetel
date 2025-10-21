@@ -11,7 +11,6 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -86,7 +85,7 @@ func (um *UDPMessage) GetBytes() []byte {
 //  SOURCE  //
 //////////////
 
-var _ stage.Source[*UDPMessage] = (*udpSource)(nil)
+var _ source[*UDPMessage] = (*udpSource)(nil)
 
 type udpSource struct {
 	tel *internal.Telemetry
@@ -204,7 +203,7 @@ func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
 
 // UDPStage is an ingress stage that reads UDP datagrams.
 type UDPStage struct {
-	*stage.Ingress[*UDPMessage]
+	*stage[*UDPMessage]
 
 	cfg *UDPConfig
 
@@ -216,7 +215,7 @@ func NewUDPStage(outputConnector conn[*UDPMessage], cfg *UDPConfig) *UDPStage {
 	source := newUDPSource()
 
 	return &UDPStage{
-		Ingress: stage.NewIngress("udp", source, outputConnector),
+		stage: newStage("udp", source, outputConnector),
 
 		cfg: cfg,
 
@@ -230,5 +229,5 @@ func (us *UDPStage) Init(ctx context.Context) error {
 		return err
 	}
 
-	return us.Ingress.Init(ctx)
+	return us.stage.Init(ctx)
 }

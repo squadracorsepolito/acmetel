@@ -2,10 +2,12 @@ package processor
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
+	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
 //////////////
@@ -14,19 +16,19 @@ import (
 
 // FilterConfig structs contains the configuration for the [FilterStage].
 type FilterConfig struct {
-	PoolConfig *pool.Config `yaml:"pool_config" json:"pool_config"`
+	Stage *stageCommon.Config
 }
 
 // DefaultFilterConfig returns the default configuration for the [FilterStage].
-func DefaultFilterConfig() *FilterConfig {
+func DefaultFilterConfig(runningMode stageCommon.RunningMode) *FilterConfig {
 	return &FilterConfig{
-		PoolConfig: pool.DefaultConfig(),
+		Stage: stageCommon.DefaultConfig(runningMode),
 	}
 }
 
-//////////////
-//  WORKER  //
-//////////////
+////////////////////////
+//  WORKER ARGUMENTS  //
+////////////////////////
 
 type filterWorkerArgs[T msg] struct {
 	filterFn func(T) bool
@@ -38,25 +40,58 @@ func newFilterWorkerArgs[T msg](filterFn func(T) bool) *filterWorkerArgs[T] {
 	}
 }
 
+//////////////////////
+//  WORKER METRICS  //
+//////////////////////
+
+type filterWorkerMetrics struct {
+	once sync.Once
+
+	filteredMessages atomic.Int64
+}
+
+var filterWorkerMetricsInst = &filterWorkerMetrics{}
+
+func (fwm *filterWorkerMetrics) init(tel *internal.Telemetry) {
+	fwm.once.Do(func() {
+		fwm.initMetrics(tel)
+	})
+}
+
+func (fwm *filterWorkerMetrics) initMetrics(tel *internal.Telemetry) {
+	tel.NewCounter("filtered_messages", func() int64 { return fwm.filteredMessages.Load() })
+}
+
+func (fwm *filterWorkerMetrics) incrementFilteredMessages() {
+	fwm.filteredMessages.Add(1)
+}
+
+/////////////////////////////
+//  WORKER IMPLEMENTATION  //
+/////////////////////////////
+
 type filterWorker[T msg] struct {
 	pool.BaseWorker
 
 	filterFn func(T) bool
 
-	// Metrics
-	filteredMessages atomic.Int64
+	metrics *filterWorkerMetrics
+}
+
+func newFilterWorkerInstMaker[T msg]() workerInstanceMaker[*filterWorkerArgs[T], T, T] {
+	return func() workerInstance[*filterWorkerArgs[T], T, T] {
+		return &filterWorker[T]{
+			metrics: filterWorkerMetricsInst,
+		}
+	}
 }
 
 func (fw *filterWorker[T]) Init(_ context.Context, args *filterWorkerArgs[T]) error {
 	fw.filterFn = args.filterFn
 
-	fw.initMetrics()
+	fw.metrics.init(fw.Tel)
 
 	return nil
-}
-
-func (fw *filterWorker[T]) initMetrics() {
-	fw.Tel.NewCounter("filtered_messages", func() int64 { return fw.filteredMessages.Load() })
 }
 
 func (fw *filterWorker[T]) Handle(ctx context.Context, msgIn T) (T, error) {
@@ -67,7 +102,7 @@ func (fw *filterWorker[T]) Handle(ctx context.Context, msgIn T) (T, error) {
 	if !fw.filterFn(msgIn) {
 		msgIn.Drop()
 
-		fw.filteredMessages.Add(1)
+		fw.metrics.incrementFilteredMessages()
 	}
 
 	return msgIn, nil
@@ -83,7 +118,7 @@ func (fw *filterWorker[T]) Close(_ context.Context) error {
 
 // FilterStage is a processor stage that filters messages based on a user-defined function.
 type FilterStage[T msg] struct {
-	*stage.Processor[T, T, filterWorker[T], *filterWorkerArgs[T], *filterWorker[T]]
+	stage[*filterWorkerArgs[T], T, T]
 
 	cfg *FilterConfig
 
@@ -93,8 +128,8 @@ type FilterStage[T msg] struct {
 // NewFilterStage returns a new filter processor stage.
 func NewFilterStage[T msg](filterFn func(T) bool, inputConnector, outputConnector conn[T], cfg *FilterConfig) *FilterStage[T] {
 	return &FilterStage[T]{
-		Processor: stage.NewProcessor[T, T, filterWorker[T], *filterWorkerArgs[T]](
-			"filter", inputConnector, outputConnector, cfg.PoolConfig,
+		stage: newStage(
+			"filter", inputConnector, outputConnector, newFilterWorkerInstMaker[T](), cfg.Stage,
 		),
 
 		cfg: cfg,
@@ -105,5 +140,5 @@ func NewFilterStage[T msg](filterFn func(T) bool, inputConnector, outputConnecto
 
 // Init initializes the stage.
 func (fs *FilterStage[T]) Init(ctx context.Context) error {
-	return fs.Processor.Init(ctx, newFilterWorkerArgs(fs.filterFn))
+	return fs.stage.Init(ctx, newFilterWorkerArgs(fs.filterFn))
 }

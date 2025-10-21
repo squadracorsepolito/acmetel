@@ -16,6 +16,7 @@ import (
 //  CONFIG  //
 //////////////
 
+// ROBConfig structs contains the configuration for the re-order buffer stage.
 type ROBConfig struct {
 	// MaxSeqNum is the maximum possible sequence number.
 	//
@@ -55,6 +56,7 @@ type ROBConfig struct {
 	ResetTimeout time.Duration
 }
 
+// DefaultROBConfig returns the default configuration for the re-order buffer stage.
 func DefaultROBConfig() *ROBConfig {
 	return &ROBConfig{
 		MaxSeqNum:           255,
@@ -71,6 +73,8 @@ func DefaultROBConfig() *ROBConfig {
 //  STAGE  //
 /////////////
 
+// ROBStage is the re-order buffer stage.
+// It can only be run in single-threaded mode.
 type ROBStage[T message.ReOrderable] struct {
 	tel *internal.Telemetry
 
@@ -93,6 +97,7 @@ type ROBStage[T message.ReOrderable] struct {
 	resets atomic.Int64
 }
 
+// NewROBStage returns a new re-order buffer stage.
 func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outConnector connector.Connector[T], cfg *ROBConfig) *ROBStage[T] {
 	tel := internal.NewTelemetry("processor", "rob")
 
@@ -106,6 +111,7 @@ func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outC
 	}
 }
 
+// Init initializes the stage.
 func (rs *ROBStage[T]) Init(ctx context.Context) error {
 	rs.tel.LogInfo("initializing")
 	defer rs.tel.LogInfo("initialized")

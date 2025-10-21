@@ -5,6 +5,7 @@ import (
 	"iter"
 	"math/big"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -23,8 +24,7 @@ import (
 
 // QuestDBConfig structs contains the configuration for the QuestDB egress stage.
 type QuestDBConfig struct {
-	// PoolConfig contains the configuration for the pool of workers.
-	PoolConfig *pool.Config
+	Stage *stageCommon.Config
 
 	// Address of the QuestDB server.
 	//
@@ -33,10 +33,9 @@ type QuestDBConfig struct {
 }
 
 // DefaultQuestDBConfig returns the default configuration for the QuestDB egress stage.
-func DefaultQuestDBConfig() *QuestDBConfig {
+func DefaultQuestDBConfig(runningMode stageCommon.RunningMode) *QuestDBConfig {
 	return &QuestDBConfig{
-		PoolConfig: pool.DefaultConfig(),
-
+		Stage:   stageCommon.DefaultConfig(runningMode),
 		Address: "localhost:9000",
 	}
 }
@@ -228,9 +227,9 @@ func (qr *QuestDBRow) AddColumns(columns ...QuestDBColumn) {
 	qr.columns = append(qr.columns, columns...)
 }
 
-//////////////
-//  WORKER  //
-//////////////
+////////////////////////
+//  WORKER ARGUMENTS  //
+////////////////////////
 
 type questDBWorkerArgs struct {
 	senderPool *qdb.LineSenderPool
@@ -240,21 +239,50 @@ func newQuestDBWorkerArgs(senderPool *qdb.LineSenderPool) *questDBWorkerArgs {
 	return &questDBWorkerArgs{senderPool: senderPool}
 }
 
-type questDBWorker struct {
-	tel *internal.Telemetry
+//////////////////////
+//  WORKER METRICS  //
+//////////////////////
 
-	sender qdb.LineSender
+type questDBWorkerMetrics struct {
+	once sync.Once
 
-	// Metrics
 	insertedRows atomic.Int64
 }
 
-func (qw *questDBWorker) SetTelemetry(tel *internal.Telemetry) {
-	qw.tel = tel
+var questDBWorkerMetricsInst = &questDBWorkerMetrics{}
+
+func (qwm *questDBWorkerMetrics) init(tel *internal.Telemetry) {
+	qwm.once.Do(func() {
+		qwm.initMetrics(tel)
+	})
 }
 
-func (qw *questDBWorker) initMetrics() {
-	qw.tel.NewCounter("inserted_rows", func() int64 { return qw.insertedRows.Load() })
+func (qwm *questDBWorkerMetrics) initMetrics(tel *internal.Telemetry) {
+	tel.NewCounter("inserted_rows", func() int64 { return qwm.insertedRows.Load() })
+}
+
+func (qwm *questDBWorkerMetrics) addInsertedRows(amount int) {
+	qwm.insertedRows.Add(int64(amount))
+}
+
+/////////////////////////////
+//  WORKER IMPLEMENTATION  //
+/////////////////////////////
+
+type questDBWorker struct {
+	pool.BaseWorker
+
+	sender qdb.LineSender
+
+	metrics *questDBWorkerMetrics
+}
+
+func newQuestDBWorkerInstMaker() workerInstanceMaker[*questDBWorkerArgs, *QuestDBMessage] {
+	return func() workerInstance[*questDBWorkerArgs, *QuestDBMessage] {
+		return &questDBWorker{
+			metrics: questDBWorkerMetricsInst,
+		}
+	}
 }
 
 func (qw *questDBWorker) Init(ctx context.Context, args *questDBWorkerArgs) error {
@@ -266,17 +294,17 @@ func (qw *questDBWorker) Init(ctx context.Context, args *questDBWorkerArgs) erro
 	qw.sender = sender
 
 	// Initialize the metrics
-	qw.initMetrics()
+	qw.metrics.init(qw.Tel)
 
 	return nil
 }
 
 func (qw *questDBWorker) Deliver(ctx context.Context, qdbMsg *QuestDBMessage) error {
 	// Extract the span context from the input message
-	ctx, span := qw.tel.NewTrace(qdbMsg.LoadSpanContext(ctx), "deliver QuestDB rows")
+	ctx, span := qw.Tel.NewTrace(qdbMsg.LoadSpanContext(ctx), "deliver QuestDB rows")
 	defer span.End()
 
-	tmpInsRows := int64(0)
+	tmpInsRows := 0
 	for row := range qdbMsg.iterRows() {
 		query := qw.sender.Table(row.table)
 
@@ -308,10 +336,10 @@ func (qw *questDBWorker) Deliver(ctx context.Context, qdbMsg *QuestDBMessage) er
 		tmpInsRows++
 	}
 
-	span.SetAttributes(attribute.Int64("inserted_rows", tmpInsRows))
+	span.SetAttributes(attribute.Int64("inserted_rows", int64(tmpInsRows)))
 
 	// Update metrics
-	qw.insertedRows.Add(tmpInsRows)
+	qw.metrics.addInsertedRows(tmpInsRows)
 
 	return nil
 }
@@ -332,7 +360,7 @@ func (qw *questDBWorker) Close(ctx context.Context) error {
 
 // QuestDBStage is an egress stage that writes messages to QuestDB.
 type QuestDBStage struct {
-	*stage.Egress[*QuestDBMessage, questDBWorker, *questDBWorkerArgs, *questDBWorker]
+	stage[*questDBWorkerArgs, *QuestDBMessage]
 
 	cfg *QuestDBConfig
 
@@ -342,7 +370,7 @@ type QuestDBStage struct {
 // NewQuestDBStage returns a new QuestDB egress stage.
 func NewQuestDBStage(inputConnector connector.Connector[*QuestDBMessage], cfg *QuestDBConfig) *QuestDBStage {
 	return &QuestDBStage{
-		Egress: stage.NewEgress[*QuestDBMessage, questDBWorker, *questDBWorkerArgs]("questdb", inputConnector, cfg.PoolConfig),
+		stage: newStage("questdb", inputConnector, newQuestDBWorkerInstMaker(), cfg.Stage),
 
 		cfg: cfg,
 	}
@@ -362,15 +390,15 @@ func (qs *QuestDBStage) Init(ctx context.Context) error {
 	}
 	qs.senderPool = senderPool
 
-	return qs.Egress.Init(ctx, newQuestDBWorkerArgs(senderPool))
+	return qs.stage.Init(ctx, newQuestDBWorkerArgs(senderPool))
 }
 
 // Close closes the stage.
 func (qs *QuestDBStage) Close() {
-	qs.Egress.Close()
+	qs.stage.Close()
 
 	// Close the sender pool
 	if err := qs.senderPool.Close(context.Background()); err != nil {
-		qs.Tel.LogError("failed to close sender pool", err)
+		qs.Tel().LogError("failed to close sender pool", err)
 	}
 }

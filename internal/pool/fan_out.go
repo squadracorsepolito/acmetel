@@ -6,17 +6,21 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/rb"
 )
 
-type fanOut[T any] struct {
+// FanOut is an utility struct to be used by a worker pool
+// that sends tasks (messages) to multiple workers.
+type FanOut[T any] struct {
 	buffer *rb.RingBuffer[T]
 }
 
-func newFanOut[T any](bufferCapacity int) *fanOut[T] {
-	return &fanOut[T]{
+// NewFanOut returns a new fan-out struct.
+func NewFanOut[T any](bufferCapacity int) *FanOut[T] {
+	return &FanOut[T]{
 		buffer: rb.NewRingBuffer[T](uint32(bufferCapacity), rb.BufferKindMPMC),
 	}
 }
 
-func (fo *fanOut[T]) addTask(ctx context.Context, task T) error {
+// AddTask enqueues a task in the ring buffer.
+func (fo *FanOut[T]) AddTask(ctx context.Context, task T) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -26,10 +30,12 @@ func (fo *fanOut[T]) addTask(ctx context.Context, task T) error {
 	return fo.buffer.Write(task)
 }
 
-func (fo *fanOut[T]) readTask() (T, error) {
+// ReadTask dequeues a task from the ring buffer.
+func (fo *FanOut[T]) ReadTask() (T, error) {
 	return fo.buffer.Read()
 }
 
-func (fo *fanOut[T]) close() {
+// Close closes the ring buffer.
+func (fo *FanOut[T]) Close() {
 	fo.buffer.Close()
 }

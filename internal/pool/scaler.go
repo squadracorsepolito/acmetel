@@ -9,7 +9,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal"
 )
 
-type scalerCfg struct {
+type scalerConfig struct {
 	enabled             bool
 	minWorkers          int
 	maxWorkers          int
@@ -19,10 +19,24 @@ type scalerCfg struct {
 	interval            time.Duration
 }
 
-type scaler struct {
+func newScalerConfig(poolCfg *Config) *scalerConfig {
+	return &scalerConfig{
+		enabled:             poolCfg.AutoScaleEnabled,
+		maxWorkers:          poolCfg.MaxWorkers,
+		minWorkers:          poolCfg.MinWorkers,
+		queueDepthThreshold: float64(poolCfg.QueueDepthPerWorker),
+		scaleDownFactor:     poolCfg.ScaleDownFactor,
+		scaleDownBackoff:    poolCfg.ScaleDownBackoff,
+		interval:            poolCfg.AutoScaleInterval,
+	}
+}
+
+// Scaler is an utility struct for a worker pool
+// that implements worker auto-scaling.
+type Scaler struct {
 	tel *internal.Telemetry
 
-	cfg *scalerCfg
+	cfg *scalerConfig
 
 	consecuriveScaleDown int
 	scaleDownAt          float64
@@ -36,8 +50,11 @@ type scaler struct {
 	pendingTasks atomic.Int64
 }
 
-func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
-	return &scaler{
+// NewScaler returns a new auto-scaler instance.
+func NewScaler(tel *internal.Telemetry, poolCfg *Config) *Scaler {
+	cfg := newScalerConfig(poolCfg)
+
+	return &Scaler{
 		tel: tel,
 
 		cfg: cfg,
@@ -50,7 +67,7 @@ func newScaler(tel *internal.Telemetry, cfg *scalerCfg) *scaler {
 	}
 }
 
-func (s *scaler) initMetrics() {
+func (s *Scaler) initMetrics() {
 	s.tel.NewUpDownCounter("worker_pool_pending_tasks", func() int64 {
 		return s.pendingTasks.Load()
 	})
@@ -60,7 +77,8 @@ func (s *scaler) initMetrics() {
 	})
 }
 
-func (s *scaler) init(ctx context.Context, initialWorkers int) {
+// Init initializes the auto-scaler.
+func (s *Scaler) Init(ctx context.Context, initialWorkers int) {
 	for range s.cfg.maxWorkers {
 		s.stopChList = append(s.stopChList, make(chan struct{}, 1))
 	}
@@ -74,7 +92,8 @@ func (s *scaler) init(ctx context.Context, initialWorkers int) {
 	s.initMetrics()
 }
 
-func (s *scaler) run(ctx context.Context) {
+// Run starts the auto-scaler.
+func (s *Scaler) Run(ctx context.Context) {
 	if !s.cfg.enabled {
 		return
 	}
@@ -93,7 +112,7 @@ func (s *scaler) run(ctx context.Context) {
 	}
 }
 
-func (s *scaler) evaluateAndScale(ctx context.Context) {
+func (s *Scaler) evaluateAndScale(ctx context.Context) {
 	currWorkers := int(s.currWorkers.Load())
 	pendingTasks := int(s.pendingTasks.Load())
 	activeWorkers := int(s.activeWorkers.Load())
@@ -142,14 +161,14 @@ func (s *scaler) evaluateAndScale(ctx context.Context) {
 	}
 }
 
-func (s *scaler) resetScaleDownTiming() {
+func (s *Scaler) resetScaleDownTiming() {
 	s.consecuriveScaleDown = 0
 	s.scaleDownAt = 1
 }
 
 // checkScaleDownTiming states if it is the right time to scale down
 // and updates the necessary parameters
-func (s *scaler) checkScaleDownTiming() bool {
+func (s *Scaler) checkScaleDownTiming() bool {
 	s.consecuriveScaleDown++
 
 	// Check if it is the right time to scale down
@@ -166,14 +185,14 @@ func (s *scaler) checkScaleDownTiming() bool {
 	return true
 }
 
-func (s *scaler) sendStart(ctx context.Context) {
+func (s *Scaler) sendStart(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 	case s.startCh <- struct{}{}:
 	}
 }
 
-func (s *scaler) sendStop(ctx context.Context, id int) {
+func (s *Scaler) sendStop(ctx context.Context, id int) {
 	if id > s.cfg.maxWorkers {
 		return
 	}
@@ -185,7 +204,7 @@ func (s *scaler) sendStop(ctx context.Context, id int) {
 	}
 }
 
-func (s *scaler) scaleWorkers(ctx context.Context, targetCount int) {
+func (s *Scaler) scaleWorkers(ctx context.Context, targetCount int) {
 	currWorkerCount := int(s.currWorkers.Swap(int32(targetCount)))
 	delta := targetCount - currWorkerCount
 
@@ -208,7 +227,8 @@ func (s *scaler) scaleWorkers(ctx context.Context, targetCount int) {
 	}
 }
 
-func (s *scaler) stop() {
+// Close closes the auto-scaler.
+func (s *Scaler) Close() {
 	for _, stopCh := range s.stopChList {
 		close(stopCh)
 	}
@@ -216,24 +236,32 @@ func (s *scaler) stop() {
 	close(s.startCh)
 }
 
-func (s *scaler) notifyWorkerStart() int {
+// NotifyWorkerStart notifies the scaler that a new worker has started.
+func (s *Scaler) NotifyWorkerStart() int {
 	workerID := int(s.activeWorkers.Add(1)) - 1
 	return min(workerID, s.cfg.maxWorkers-1)
 }
 
-func (s *scaler) notifyWorkerStop() {
+// NotifyWorkerStop notifies the scaler that a worker has stopped.
+func (s *Scaler) NotifyWorkerStop() {
 	s.activeWorkers.Add(-1)
 }
 
-func (s *scaler) notifyTaskAdded() {
+// NotifyTaskAdded notifies the scaler that
+// a new task has been added to the worker pool.
+func (s *Scaler) NotifyTaskAdded() {
 	s.pendingTasks.Add(1)
 }
 
-func (s *scaler) notifyTaskCompleted() {
+// NotifyTaskCompleted notifies the scaler that
+// a task has been completed.
+func (s *Scaler) NotifyTaskCompleted() {
 	s.pendingTasks.Add(-1)
 }
 
-func (s *scaler) getStopCh(workerID int) <-chan struct{} {
+// GetStopCh returns the stop channel used to stop a
+// specific worker.
+func (s *Scaler) GetStopCh(workerID int) <-chan struct{} {
 	if workerID >= s.cfg.maxWorkers {
 		return nil
 	}
@@ -241,6 +269,8 @@ func (s *scaler) getStopCh(workerID int) <-chan struct{} {
 	return s.stopChList[workerID]
 }
 
-func (s *scaler) getStartCh() <-chan struct{} {
+// GetStartCh returns the start channel used to trigger
+// the creation of a new workers.
+func (s *Scaler) GetStartCh() <-chan struct{} {
 	return s.startCh
 }

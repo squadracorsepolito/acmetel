@@ -8,7 +8,6 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -50,7 +49,7 @@ func newTickerMessage() *TickerMessage {
 //  SOURCE  //
 //////////////
 
-var _ stage.Source[*TickerMessage] = (*tickerSource)(nil)
+var _ source[*TickerMessage] = (*tickerSource)(nil)
 
 type tickerSource struct {
 	tel *internal.Telemetry
@@ -114,7 +113,7 @@ func (ts *tickerSource) handleTrigger(ctx context.Context, tick int) *TickerMess
 
 // TickerStage is an ingress stage that ticks periodically.
 type TickerStage struct {
-	*stage.Ingress[*TickerMessage]
+	*stage[*TickerMessage]
 
 	cfg *TickerConfig
 
@@ -126,7 +125,7 @@ func NewTickerStage(outConnector connector.Connector[*TickerMessage], cfg *Ticke
 	source := newTickerSource()
 
 	return &TickerStage{
-		Ingress: stage.NewIngress("ticker", source, outConnector),
+		stage: newStage("ticker", source, outConnector),
 
 		cfg: cfg,
 
@@ -138,5 +137,5 @@ func NewTickerStage(outConnector connector.Connector[*TickerMessage], cfg *Ticke
 func (s *TickerStage) Init(ctx context.Context) error {
 	s.source.init(s.cfg.Interval)
 
-	return s.Ingress.Init(ctx)
+	return s.stage.Init(ctx)
 }

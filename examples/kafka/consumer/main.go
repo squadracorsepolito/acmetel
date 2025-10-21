@@ -28,11 +28,11 @@ func main() {
 	kafkaIngressCfg := ingress.DefaultKafkaConfig("example-topic")
 	kafkaIngressStage := ingress.NewKafkaStage(kafkaToRaw, kafkaIngressCfg)
 
-	customCfg := processor.DefaultCustomConfig()
+	customCfg := processor.DefaultCustomConfig(acmetel.StageRunningModePool)
 	customCfg.Name = "ingress_to_egress"
 	customStage := processor.NewCustomStage(newIngressToEgressHandler(), kafkaToRaw, customToKafka, customCfg)
 
-	kafkaEgressCfg := egress.DefaultKafkaConfig()
+	kafkaEgressCfg := egress.DefaultKafkaConfig(acmetel.StageRunningModePool)
 	kafkaEgressStage := egress.NewKafkaStage(customToKafka, kafkaEgressCfg)
 
 	pipeline := acmetel.NewPipeline()

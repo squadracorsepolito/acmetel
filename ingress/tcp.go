@@ -14,7 +14,6 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -513,7 +512,7 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 
 // TCPStage is an ingress stage that reads TCP connections and extracts messages.
 type TCPStage struct {
-	*stage.Ingress[*TCPMessage]
+	*stage[*TCPMessage]
 
 	cfg *TCPConfig
 
@@ -534,7 +533,7 @@ func NewTCPStage(outputConnector conn[*TCPMessage], cfg *TCPConfig) *TCPStage {
 	})
 
 	return &TCPStage{
-		Ingress: stage.NewIngress("tcp", source, outputConnector),
+		stage: newStage("tcp", source, outputConnector),
 
 		cfg: cfg,
 
@@ -548,5 +547,5 @@ func (ts *TCPStage) Init(ctx context.Context) error {
 		return err
 	}
 
-	return ts.Ingress.Init(ctx)
+	return ts.stage.Init(ctx)
 }

@@ -4,10 +4,12 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 
+	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -17,7 +19,7 @@ import (
 
 // UDPConfig structs contains the configuration for the UDP egress stage.
 type UDPConfig struct {
-	PoolConfig *pool.Config
+	Stage *stageCommon.Config
 
 	// IPAddr is the destination IP address.
 	//
@@ -31,17 +33,18 @@ type UDPConfig struct {
 }
 
 // DefaultUDPConfig returns the default configuration for the UDP egress stage.
-func DefaultUDPConfig() *UDPConfig {
+func DefaultUDPConfig(runningMode stageCommon.RunningMode) *UDPConfig {
 	return &UDPConfig{
-		PoolConfig: pool.DefaultConfig(),
-		IPAddr:     "127.0.0.1",
-		Port:       20_000,
+		Stage: stageCommon.DefaultConfig(runningMode),
+
+		IPAddr: "127.0.0.1",
+		Port:   20_000,
 	}
 }
 
-//////////////
-//  WORKER  //
-//////////////
+////////////////////////
+//  WORKER ARGUMENTS  //
+////////////////////////
 
 type udpWorkerArgs struct {
 	conn *net.UDPConn
@@ -53,23 +56,56 @@ func newUDPWorkerArgs(conn *net.UDPConn) *udpWorkerArgs {
 	}
 }
 
+//////////////////////
+//  WORKER METRICS  //
+//////////////////////
+
+type udpWorkerMetrics struct {
+	once sync.Once
+
+	deliveredBytes atomic.Int64
+}
+
+var udpWorkerMetricsInst = &udpWorkerMetrics{}
+
+func (uwm *udpWorkerMetrics) init(tel *internal.Telemetry) {
+	uwm.once.Do(func() {
+		uwm.initMetrics(tel)
+	})
+}
+
+func (uwm *udpWorkerMetrics) initMetrics(tel *internal.Telemetry) {
+	tel.NewCounter("delivered_bytes", func() int64 { return uwm.deliveredBytes.Load() })
+}
+
+func (uwm *udpWorkerMetrics) addDeliveredBytes(amount int) {
+	uwm.deliveredBytes.Add(int64(amount))
+}
+
+/////////////////////////////
+//  WORKER IMPLEMENTATION  //
+/////////////////////////////
+
 type udpWorker[T msgSer] struct {
 	pool.BaseWorker
 
 	conn *net.UDPConn
 
-	// Metrics
-	deliveredBytes atomic.Int64
+	metrics *udpWorkerMetrics
 }
 
-func (uw *udpWorker[T]) initMetrics() {
-	uw.Tel.NewCounter("delivered_bytes", func() int64 { return uw.deliveredBytes.Load() })
+func newUDPWorkerInstMaker[T msgSer]() workerInstanceMaker[*udpWorkerArgs, T] {
+	return func() workerInstance[*udpWorkerArgs, T] {
+		return &udpWorker[T]{
+			metrics: udpWorkerMetricsInst,
+		}
+	}
 }
 
 func (uw *udpWorker[T]) Init(_ context.Context, args *udpWorkerArgs) error {
 	uw.conn = args.conn
 
-	uw.initMetrics()
+	uw.metrics.init(uw.Tel)
 
 	return nil
 }
@@ -90,7 +126,7 @@ func (uw *udpWorker[T]) Deliver(ctx context.Context, udpMsg T) error {
 	span.SetAttributes(attribute.Int("payload_size", payloadSize))
 
 	// Update metrics
-	uw.deliveredBytes.Add(int64(deliveredBytes))
+	uw.metrics.addDeliveredBytes(deliveredBytes)
 
 	return nil
 }
@@ -105,7 +141,7 @@ func (uw *udpWorker[T]) Close(_ context.Context) error {
 
 // UDPStage is an egress stage that sends UDP datagrams.
 type UDPStage[T msgSer] struct {
-	*stage.Egress[T, udpWorker[T], *udpWorkerArgs, *udpWorker[T]]
+	stage[*udpWorkerArgs, T]
 
 	cfg *UDPConfig
 
@@ -115,8 +151,8 @@ type UDPStage[T msgSer] struct {
 // NewUDPStage returns a new UDP egress stage.
 func NewUDPStage[T msgSer](inputConnector conn[T], cfg *UDPConfig) *UDPStage[T] {
 	return &UDPStage[T]{
-		Egress: stage.NewEgress[T, udpWorker[T], *udpWorkerArgs](
-			"udp", inputConnector, cfg.PoolConfig,
+		stage: newStage(
+			"udp", inputConnector, newUDPWorkerInstMaker[T](), cfg.Stage,
 		),
 
 		cfg: cfg,
@@ -140,5 +176,5 @@ func (us *UDPStage[T]) Init(ctx context.Context) error {
 
 	us.conn = conn
 
-	return us.Egress.Init(ctx, newUDPWorkerArgs(conn))
+	return us.stage.Init(ctx, newUDPWorkerArgs(conn))
 }

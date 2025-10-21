@@ -6,6 +6,7 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
+type msg = message.Message
 type msgSer = message.Serializable
 
 type conn[T any] = connector.Connector[T]

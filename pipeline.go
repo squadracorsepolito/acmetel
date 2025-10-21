@@ -5,6 +5,14 @@ import (
 	"sync"
 
 	"github.com/squadracorsepolito/acmetel/connector"
+	"github.com/squadracorsepolito/acmetel/internal/stage"
+)
+
+type StageRunningMode = stage.RunningMode
+
+const (
+	StageRunningModeSingle = stage.RunningModeSingle
+	StageRunningModePool   = stage.RunningModePool
 )
 
 type Stage interface {

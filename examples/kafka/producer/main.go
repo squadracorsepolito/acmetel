@@ -30,11 +30,11 @@ func main() {
 	tickerCfg.Interval = time.Second
 	tickerStage := ingress.NewTickerStage(tickerToCustom, tickerCfg)
 
-	customCfg := processor.DefaultCustomConfig()
+	customCfg := processor.DefaultCustomConfig(acmetel.StageRunningModePool)
 	customCfg.Name = "ticker_to_kafka"
 	customStage := processor.NewCustomStage(newTickerToKafkaHandler(), tickerToCustom, customToKafka, customCfg)
 
-	kafkaCfg := egress.DefaultKafkaConfig()
+	kafkaCfg := egress.DefaultKafkaConfig(acmetel.StageRunningModePool)
 	kafkaStage := egress.NewKafkaStage(customToKafka, kafkaCfg)
 
 	pipeline := acmetel.NewPipeline()

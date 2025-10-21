@@ -2,24 +2,30 @@ package pool
 
 import "github.com/squadracorsepolito/acmetel/internal/rb"
 
-type fanIn[T any] struct {
+// FanIn is an utility struct to be used by a worker pool
+// that receives tasks (messages) from multiple workers.
+type FanIn[T any] struct {
 	buffer *rb.RingBuffer[T]
 }
 
-func newFanIn[T any](bufferCapacity int) *fanIn[T] {
-	return &fanIn[T]{
+// NewFanIn returns a new fan-in struct.
+func NewFanIn[T any](bufferCapacity int) *FanIn[T] {
+	return &FanIn[T]{
 		buffer: rb.NewRingBuffer[T](uint32(bufferCapacity), rb.BufferKindMPMC),
 	}
 }
 
-func (fi *fanIn[T]) addTask(task T) error {
+// AddTask enqueues a task in the ring buffer.
+func (fi *FanIn[T]) AddTask(task T) error {
 	return fi.buffer.Write(task)
 }
 
-func (fi *fanIn[T]) readTask() (T, error) {
+// ReadTask dequeues a task from the ring buffer.
+func (fi *FanIn[T]) ReadTask() (T, error) {
 	return fi.buffer.Read()
 }
 
-func (fi *fanIn[T]) close() {
+// Close closes the ring buffer.
+func (fi *FanIn[T]) Close() {
 	fi.buffer.Close()
 }

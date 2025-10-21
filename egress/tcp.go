@@ -4,11 +4,13 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/stage"
+	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -18,7 +20,7 @@ import (
 
 // TCPConfig structs contains the configuration for the TCP egress stage.
 type TCPConfig struct {
-	PoolConfig *pool.Config
+	Stage *stageCommon.Config
 
 	// IPAddr is the destination IP address.
 	//
@@ -37,18 +39,18 @@ type TCPConfig struct {
 }
 
 // DefaultTCPConfig returns a default TCPConfig.
-func DefaultTCPConfig() *TCPConfig {
+func DefaultTCPConfig(runningMode stageCommon.RunningMode) *TCPConfig {
 	return &TCPConfig{
-		PoolConfig:   pool.DefaultConfig(),
+		Stage:        stageCommon.DefaultConfig(runningMode),
 		IPAddr:       "127.0.0.1",
 		Port:         20_000,
 		WriteTimeout: 10 * time.Second,
 	}
 }
 
-//////////////
-//  WORKER  //
-//////////////
+////////////////////////
+//  WORKER ARGUMENTS  //
+////////////////////////
 
 type tcpWorkerArgs struct {
 	conn         *net.TCPConn
@@ -62,27 +64,60 @@ func newTCPWorkerArgs(conn *net.TCPConn, writeTimeout time.Duration) *tcpWorkerA
 	}
 }
 
+//////////////////////
+//  WORKER METRICS  //
+//////////////////////
+
+type tcpWorkerMetrics struct {
+	once sync.Once
+
+	deliveredBytes atomic.Int64
+}
+
+var tcpWorkerMetricsInst = &tcpWorkerMetrics{}
+
+func (twm *tcpWorkerMetrics) init(tel *internal.Telemetry) {
+	twm.once.Do(func() {
+		twm.initMetrics(tel)
+	})
+}
+
+func (twm *tcpWorkerMetrics) initMetrics(tel *internal.Telemetry) {
+	tel.NewCounter("delivered_bytes", func() int64 { return twm.deliveredBytes.Load() })
+}
+
+func (twm *tcpWorkerMetrics) addDeliveredBytes(amount int) {
+	twm.deliveredBytes.Add(int64(amount))
+}
+
+/////////////////////////////
+//  WORKER IMPLEMENTATION  //
+/////////////////////////////
+
 type tcpWorker[T msgSer] struct {
 	pool.BaseWorker
 
 	conn         *net.TCPConn
 	writeTimeout time.Duration
 
-	// Metrics
-	deliveredBytes atomic.Int64
+	metrics *tcpWorkerMetrics
+}
+
+func newTCPWorkerInstMaker[T msgSer]() workerInstanceMaker[*tcpWorkerArgs, T] {
+	return func() workerInstance[*tcpWorkerArgs, T] {
+		return &tcpWorker[T]{
+			metrics: tcpWorkerMetricsInst,
+		}
+	}
 }
 
 func (tw *tcpWorker[T]) Init(_ context.Context, args *tcpWorkerArgs) error {
 	tw.conn = args.conn
 	tw.writeTimeout = args.writeTimeout
 
-	tw.initMetrics()
+	tw.metrics.init(tw.Tel)
 
 	return nil
-}
-
-func (tw *tcpWorker[T]) initMetrics() {
-	tw.Tel.NewCounter("delivered_bytes", func() int64 { return tw.deliveredBytes.Load() })
 }
 
 func (tw *tcpWorker[T]) Deliver(ctx context.Context, msg T) error {
@@ -104,7 +139,7 @@ func (tw *tcpWorker[T]) Deliver(ctx context.Context, msg T) error {
 	span.SetAttributes(attribute.Int("message_size", len(tcpMsg)))
 
 	// Update metrics
-	tw.deliveredBytes.Add(int64(deliveredBytes))
+	tw.metrics.addDeliveredBytes(deliveredBytes)
 
 	return nil
 }
@@ -119,7 +154,7 @@ func (tw *tcpWorker[T]) Close(_ context.Context) error {
 
 // TCPStage is an egress stage that writes messages to a TCP connection.
 type TCPStage[T msgSer] struct {
-	*stage.Egress[T, tcpWorker[T], *tcpWorkerArgs, *tcpWorker[T]]
+	stage[*tcpWorkerArgs, T]
 
 	cfg *TCPConfig
 
@@ -129,8 +164,8 @@ type TCPStage[T msgSer] struct {
 // NewTCPStage returns a new TCP egress stage.
 func NewTCPStage[T msgSer](inputConnector conn[T], cfg *TCPConfig) *TCPStage[T] {
 	return &TCPStage[T]{
-		Egress: stage.NewEgress[T, tcpWorker[T], *tcpWorkerArgs](
-			"tcp", inputConnector, cfg.PoolConfig,
+		stage: newStage(
+			"tcp", inputConnector, newTCPWorkerInstMaker[T](), cfg.Stage,
 		),
 
 		cfg: cfg,
@@ -154,5 +189,5 @@ func (ts *TCPStage[T]) Init(ctx context.Context) error {
 
 	ts.conn = conn
 
-	return ts.Egress.Init(ctx, newTCPWorkerArgs(ts.conn, ts.cfg.WriteTimeout))
+	return ts.stage.Init(ctx, newTCPWorkerArgs(ts.conn, ts.cfg.WriteTimeout))
 }
