@@ -116,6 +116,8 @@ func (w *worker[Args, In]) deliver(ctx context.Context, msgIn In) {
 }
 
 func (w *worker[Args, In]) close(ctx context.Context) {
+	w.tel.LogInfo("closing worker", "worker_id", w.id)
+
 	if err := w.inst.Close(ctx); err != nil {
 		w.tel.LogError("failed to close worker", err, "worker_id", w.id)
 	}
