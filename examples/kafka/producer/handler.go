@@ -6,9 +6,12 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/ingress"
+	"github.com/squadracorsepolito/acmetel/processor"
 )
 
-type tickerToKafkaHandler struct{}
+type tickerToKafkaHandler struct {
+	processor.CustomHandlerBase
+}
 
 func newTickerToKafkaHandler() *tickerToKafkaHandler {
 	return &tickerToKafkaHandler{}

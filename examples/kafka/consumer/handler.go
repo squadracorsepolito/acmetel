@@ -5,9 +5,12 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/egress"
 	"github.com/squadracorsepolito/acmetel/ingress"
+	"github.com/squadracorsepolito/acmetel/processor"
 )
 
-type ingressToEgressHandler struct{}
+type ingressToEgressHandler struct {
+	processor.CustomHandlerBase
+}
 
 func newIngressToEgressHandler() *ingressToEgressHandler {
 	return &ingressToEgressHandler{}

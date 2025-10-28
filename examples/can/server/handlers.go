@@ -7,7 +7,9 @@ import (
 	"github.com/squadracorsepolito/acmetel/processor"
 )
 
-type canToQuestDBHandler struct{}
+type canToQuestDBHandler struct {
+	processor.CustomHandlerBase
+}
 
 func newCANToQuestDBHandler() *canToQuestDBHandler {
 	return &canToQuestDBHandler{}

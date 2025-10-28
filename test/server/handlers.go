@@ -7,14 +7,12 @@ import (
 	"github.com/squadracorsepolito/acmetel/processor"
 )
 
-type canToQuestDBHandler struct{}
+type canToQuestDBHandler struct {
+	processor.CustomHandlerBase
+}
 
 func newCANToQuestDBHandler() *canToQuestDBHandler {
 	return &canToQuestDBHandler{}
-}
-
-func (h *canToQuestDBHandler) Init(_ context.Context) error {
-	return nil
 }
 
 func (h *canToQuestDBHandler) Handle(_ context.Context, canMsg *processor.CANMessage, qdbMsg *egress.QuestDBMessage) error {

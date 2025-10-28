@@ -49,6 +49,33 @@ type CustomHandler[In msg, T any, Out msgPtr[T]] interface {
 
 	// Close is called once when the stage is closed.
 	Close()
+
+	// SetTelemetry sets the telemetry for the custom handler.
+	// It can be used to add traces, logs, and metrics to the
+	// user defined handler.
+	SetTelemetry(tel *internal.Telemetry)
+}
+
+// CustomHandlerBase is a base implementation of the CustomHandler interface.
+// It provides a Telemetry field that can be used to add traces,
+// logs, and metrics to the custom handler.
+// It also provides a default implementation for the Init and Close methods,
+// but not for the Handle method.
+type CustomHandlerBase struct {
+	Telemetry *internal.Telemetry
+}
+
+// Init is a no-op implementation of the custom handler Init method.
+func (chb *CustomHandlerBase) Init(_ context.Context) error {
+	return nil
+}
+
+// Close is a no-op implementation of the custom handler Close method.
+func (chb *CustomHandlerBase) Close() {}
+
+// SetTelemetry sets the telemetry for the custom handler.
+func (chb *CustomHandlerBase) SetTelemetry(tel *internal.Telemetry) {
+	chb.Telemetry = tel
 }
 
 //////////////
@@ -81,12 +108,9 @@ func newCustomWorkerInstMaker[In msg, T any, Out msgPtr[T]]() workerInstanceMake
 	}
 }
 
-func (cw *customWorker[In, T, Out]) SetTelemetry(tel *internal.Telemetry) {
-	cw.Tel = tel
-}
-
 func (cw *customWorker[In, T, Out]) Init(_ context.Context, args *customWorkerArgs[In, T, Out]) error {
 	cw.handler = args.handler
+	cw.handler.SetTelemetry(cw.Tel)
 
 	cw.traceString = fmt.Sprintf("handle %s message", args.name)
 

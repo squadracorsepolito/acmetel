@@ -10,6 +10,8 @@ import (
 )
 
 type tickerToCannelloniHandler struct {
+	processor.CustomHandlerBase
+
 	sequenceNumber atomic.Uint32
 }
 
