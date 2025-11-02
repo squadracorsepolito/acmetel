@@ -50,17 +50,17 @@ type TCPConfig struct {
 	// IPAddr is the IP address of the server to listen on.
 	//
 	// Default: 0.0.0.0
-	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+	IPAddr string
 
 	// Port is the port to listen on.
 	//
 	// Default: 20_000
-	Port uint16 `yaml:"port" json:"port"`
+	Port uint16
 
 	// ReadTimeout is the timeout for reading from a connection.
 	//
 	// Default: 10s
-	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	ReadTimeout time.Duration
 
 	// FramingMode is the framing mode to use.
 	// It basically defines how the messages are separated.
@@ -79,7 +79,7 @@ type TCPConfig struct {
 	// when the FramingMode is TCPFramingModeDelimited.
 	//
 	// Default: "\r\n"
-	Delimiter []byte `yaml:"delimiter" json:"delimiter"`
+	Delimiter []byte
 
 	// HeaderLen is the length of the header in the context
 	// of the TCPFramingModeLengthPrefixed mode.
@@ -114,12 +114,10 @@ func DefaultTCPConfig() TCPConfig {
 //  MESSAGE  //
 ///////////////
 
-var _ message.Serializable = (*TCPMessage)(nil)
+var _ msgSer = (*TCPMessage)(nil)
 
 // TCPMessage represents a TCP message.
 type TCPMessage struct {
-	message.Base
-
 	// RemoteAddr is the remote address of the connection.
 	RemoteAddr string
 	// Message is the message payload.
@@ -132,6 +130,9 @@ func newTCPMessage() *TCPMessage {
 	return &TCPMessage{}
 }
 
+// Destroy cleans up the message.
+func (tm *TCPMessage) Destroy() {}
+
 // GetBytes returns the bytes of the TCP message.
 func (tm *TCPMessage) GetBytes() []byte {
 	return tm.Message
@@ -140,6 +141,8 @@ func (tm *TCPMessage) GetBytes() []byte {
 //////////////
 //  SOURCE  //
 //////////////
+
+var _ source[*TCPMessage] = (*tcpSource)(nil)
 
 type tcpSourceConfig struct {
 	readTimeout time.Duration
@@ -249,7 +252,7 @@ func (ts *tcpSource) initMetrics() {
 	ts.tel.NewCounter("received_messages", func() int64 { return ts.receivedMessages.Load() })
 }
 
-func (ts *tcpSource) Run(ctx context.Context, outConnector conn[*TCPMessage]) {
+func (ts *tcpSource) Run(ctx context.Context, outConnector msgConn[*TCPMessage]) {
 	// Close the listener when the context is done
 	go func() {
 		<-ctx.Done()
@@ -283,7 +286,7 @@ func (ts *tcpSource) Run(ctx context.Context, outConnector conn[*TCPMessage]) {
 	}
 }
 
-func (ts *tcpSource) handleConn(ctx context.Context, conn net.Conn, outConnector conn[*TCPMessage]) {
+func (ts *tcpSource) handleConn(ctx context.Context, conn net.Conn, outConnector msgConn[*TCPMessage]) {
 	defer ts.wg.Done()
 	defer conn.Close()
 
@@ -393,7 +396,7 @@ loop:
 
 			// Handle the message and send the result to the output connector
 			outMsg := ts.handleMessage(ctx, msg)
-			outMsg.RemoteAddr = conn.RemoteAddr().String()
+			outMsg.GetEnvelope().RemoteAddr = conn.RemoteAddr().String()
 			if err := outConnector.Write(outMsg); err != nil {
 				ts.tel.LogError("failed to write message to output connector", err)
 			}
@@ -476,7 +479,7 @@ func (ts *tcpSource) parseBigEndianMsgLen(buf []byte) int {
 	}
 }
 
-func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage {
+func (ts *tcpSource) handleMessage(ctx context.Context, rawMsg []byte) *msg[*TCPMessage] {
 	// Create the trace for the incoming message
 	_, span := ts.tel.NewTrace(ctx, "receive TCP message")
 	defer span.End()
@@ -485,25 +488,27 @@ func (ts *tcpSource) handleMessage(ctx context.Context, msg []byte) *TCPMessage 
 	tcpMsg := newTCPMessage()
 
 	// Extract the payload from the buffer
-	msgSize := len(msg)
+	msgSize := len(rawMsg)
 	tcpMsg.MessageSize = msgSize
 	tcpMsg.Message = make([]byte, msgSize)
-	copy(tcpMsg.Message, msg)
+	copy(tcpMsg.Message, rawMsg)
+
+	msg := message.NewMessage(tcpMsg)
 
 	// Set the receive time and the timestamp
 	recvTime := time.Now()
-	tcpMsg.SetReceiveTime(recvTime)
-	tcpMsg.SetTimestamp(recvTime)
+	msg.SetReceiveTime(recvTime)
+	msg.SetTimestamp(recvTime)
 
 	// Save the span into the message
 	span.SetAttributes(attribute.Int("payload_size", msgSize))
-	tcpMsg.SaveSpan(span)
+	msg.SaveSpan(span)
 
 	// Update metrics
 	ts.receivedBytes.Add(int64(msgSize))
 	ts.receivedMessages.Add(1)
 
-	return tcpMsg
+	return msg
 }
 
 /////////////
@@ -520,7 +525,7 @@ type TCPStage struct {
 }
 
 // NewTCPStage returns a new TCP stage.
-func NewTCPStage(outputConnector conn[*TCPMessage], cfg *TCPConfig) *TCPStage {
+func NewTCPStage(outputConnector msgConn[*TCPMessage], cfg *TCPConfig) *TCPStage {
 	source := newTCPSource(&tcpSourceConfig{
 		readTimeout:          cfg.ReadTimeout,
 		framingMode:          cfg.FramingMode,

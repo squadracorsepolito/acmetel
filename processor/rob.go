@@ -80,10 +80,10 @@ type ROBStage[T message.ReOrderable] struct {
 
 	cfg *ROBConfig
 
-	inputConnector  connector.Connector[T]
-	outputConnector connector.Connector[T]
+	inputConnector  msgConn[T]
+	outputConnector msgConn[T]
 
-	rob *rob.ROB[T]
+	rob *rob.ROB[*msg[T]]
 
 	// Metrics
 	orderedMsgs           atomic.Int64
@@ -98,7 +98,7 @@ type ROBStage[T message.ReOrderable] struct {
 }
 
 // NewROBStage returns a new re-order buffer stage.
-func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outConnector connector.Connector[T], cfg *ROBConfig) *ROBStage[T] {
+func NewROBStage[T message.ReOrderable](inConnector, outConnector msgConn[T], cfg *ROBConfig) *ROBStage[T] {
 	tel := internal.NewTelemetry("processor", "rob")
 
 	return &ROBStage[T]{
@@ -112,7 +112,7 @@ func NewROBStage[T message.ReOrderable](inConnector connector.Connector[T], outC
 }
 
 // Init initializes the stage.
-func (rs *ROBStage[T]) Init(ctx context.Context) error {
+func (rs *ROBStage[T]) Init(_ context.Context) error {
 	rs.tel.LogInfo("initializing")
 	defer rs.tel.LogInfo("initialized")
 
@@ -145,6 +145,7 @@ func (rs *ROBStage[T]) initMetrics() {
 	rs.tel.NewCounter("resets", func() int64 { return rs.resets.Load() })
 }
 
+// Run runs the re-order buffer stage.
 func (rs *ROBStage[T]) Run(ctx context.Context) {
 	rs.tel.LogInfo("running")
 	defer rs.tel.LogInfo("stopped")
@@ -182,6 +183,10 @@ func (rs *ROBStage[T]) Run(ctx context.Context) {
 				continue
 			}
 
+			// Set the sequence number encoded in the message
+			// value into the main message struct
+			msgIn.SetSequenceNumber(msgIn.GetEnvelope().GetSequenceNumber())
+
 			// Try to enqueue the message
 			rs.enqueue(msgIn)
 
@@ -190,7 +195,7 @@ func (rs *ROBStage[T]) Run(ctx context.Context) {
 	}
 }
 
-func (rs *ROBStage[T]) enqueue(msgIn T) {
+func (rs *ROBStage[T]) enqueue(msgIn *msg[T]) {
 	status, err := rs.rob.Enqueue(msgIn)
 	if err != nil {
 		if errors.Is(err, rob.ErrSeqNumOutOfWindow) {
@@ -214,6 +219,7 @@ func (rs *ROBStage[T]) enqueue(msgIn T) {
 	}
 }
 
+// Close closes the stage.
 func (rs *ROBStage[T]) Close() {
 	rs.tel.LogInfo("closing")
 	defer rs.tel.LogInfo("closed")

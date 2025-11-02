@@ -1,3 +1,7 @@
+// Package processor contains the processor stages.
+// All the processor stages take a message from a previous stage,
+// through an input connector, and produce a message for the next stage,
+// through an output connector.
 package processor
 
 import (
@@ -5,13 +9,15 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
-type msg = message.Message
+type msgEnv = message.Envelope
 
-type msgPtr[T any] interface {
+type msgEnvPtr[T any] interface {
 	*T
-	msg
+	msgEnv
 }
+
+type msg[T msgEnv] = message.Message[T]
 
 type msgSer = message.Serializable
 
-type conn[T any] = connector.Connector[T]
+type msgConn[T msgEnv] = connector.Connector[*msg[T]]

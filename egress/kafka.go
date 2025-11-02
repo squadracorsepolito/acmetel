@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/squadracorsepolito/acmetel/connector"
-	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"github.com/squadracorsepolito/acmetel/internal/telemetry"
@@ -24,7 +22,7 @@ type KafkaConfig struct {
 	// A list of Kafka brokers to connect to.
 	//
 	// Default: localhost:9092
-	Brokers []string `yaml:"brokers" json:"brokers"`
+	Brokers []string
 
 	// The balancer used to distribute messages across partitions.
 	//
@@ -34,47 +32,47 @@ type KafkaConfig struct {
 	// Limit on how many attempts will be made to deliver a message.
 	//
 	// Default: 10.
-	MaxAttempts int `yaml:"max_attempts" json:"max_attempts"`
+	MaxAttempts int
 
 	// WriteBackoffMin optionally sets the smallest amount of time the writer waits before
 	// it attempts to write a batch of messages
 	//
 	// Default: 100ms
-	WriteBackoffMin time.Duration `yaml:"write_backoff_min" json:"write_backoff_min"`
+	WriteBackoffMin time.Duration
 
 	// WriteBackoffMax optionally sets the maximum amount of time the writer waits before
 	// it attempts to write a batch of messages
 	//
 	// Default: 1s
-	WriteBackoffMax time.Duration `yaml:"write_backoff_max" json:"write_backoff_max"`
+	WriteBackoffMax time.Duration
 
 	// Limit on how many messages will be buffered before being sent to a
 	// partition.
 	//
 	// The default is to use a target batch size of 100 messages.
-	BatchSize int `yaml:"batch_size" json:"batch_size"`
+	BatchSize int
 
 	// Limit the maximum size of a request in bytes before being sent to
 	// a partition.
 	//
 	// The default is to use a kafka default value of 1048576.
-	BatchBytes int64 `yaml:"batch_bytes" json:"batch_bytes"`
+	BatchBytes int64
 
 	// Time limit on how often incomplete message batches will be flushed to
 	// kafka.
 	//
 	// The default is to flush at least every second.
-	BatchTimeout time.Duration `yaml:"batch_timeout" json:"batch_timeout"`
+	BatchTimeout time.Duration
 
 	// Timeout for read operations performed by the Writer.
 	//
 	// Defaults to 10 seconds.
-	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	ReadTimeout time.Duration
 
 	// Timeout for write operation performed by the Writer.
 	//
 	// Defaults to 10 seconds.
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	WriteTimeout time.Duration
 
 	// Number of acknowledges from partition replicas required before receiving
 	// a response to a produce request, the following values are supported:
@@ -92,7 +90,7 @@ type KafkaConfig struct {
 	// whether the messages were written to kafka.
 	//
 	// Defaults to true.
-	Async bool `yaml:"async" json:"async"`
+	Async bool
 
 	// Compression set the compression codec to be used to compress messages.
 	Compression kafka.Compression
@@ -103,7 +101,7 @@ type KafkaConfig struct {
 	Transport kafka.RoundTripper
 
 	// AllowAutoTopicCreation notifies writer to create topic if missing.
-	AllowAutoTopicCreation bool `yaml:"allow_auto_topic_creation" json:"allow_auto_topic_creation"`
+	AllowAutoTopicCreation bool
 }
 
 // DefaultKafkaConfig returns a default Kafka egress config.
@@ -132,10 +130,10 @@ func DefaultKafkaConfig(runningMode stageCommon.RunningMode) *KafkaConfig {
 //  MESSAGE  //
 ///////////////
 
+var _ msgEnv = (*KafkaMessage)(nil)
+
 // KafkaMessage represents the message used by the Kafka egress stage.
 type KafkaMessage struct {
-	message.Base
-
 	// Topic is the Kafka topic.
 	Topic string
 	// Key is the key of the Kafka message.
@@ -145,6 +143,9 @@ type KafkaMessage struct {
 
 	headers []kafka.Header
 }
+
+// Destroy cleans up the message.
+func (km *KafkaMessage) Destroy() {}
 
 // AddHeader adds a new Kafka header to the message.
 func (km *KafkaMessage) AddHeader(key string, value []byte) {
@@ -186,22 +187,23 @@ func (kw *kafkaWorker) Init(_ context.Context, args *kafkaWorkerArgs) error {
 	return nil
 }
 
-func (kw *kafkaWorker) Deliver(ctx context.Context, msg *KafkaMessage) error {
-	// Extract the span context from the input message
-	ctx, span := kw.Tel.NewTrace(msg.LoadSpanContext(ctx), "deliver kafka message")
+func (kw *kafkaWorker) Deliver(ctx context.Context, msgIn *msg[*KafkaMessage]) error {
+	ctx, span := kw.Tel.NewTrace(ctx, "deliver kafka message")
 	defer span.End()
 
+	kafkaMsgIn := msgIn.GetEnvelope()
+
 	// Create the header that carries the trace and eventual user defined headers
-	headerCarrier := telemetry.NewKafkaHeaderCarrier(msg.headers)
+	headerCarrier := telemetry.NewKafkaHeaderCarrier(kafkaMsgIn.headers)
 
 	// Inject the trace
 	kw.Tel.InjectTrace(ctx, headerCarrier)
 
 	// Create the message to be written
 	kafkaMsg := kafka.Message{
-		Topic: msg.Topic,
-		Key:   msg.Key,
-		Value: msg.Value,
+		Topic: kafkaMsgIn.Topic,
+		Key:   kafkaMsgIn.Key,
+		Value: kafkaMsgIn.Value,
 
 		Headers: headerCarrier.Headers(),
 	}
@@ -230,7 +232,7 @@ type KafkaStage struct {
 }
 
 // NewKafkaStage returns a new Kafka egress stage.
-func NewKafkaStage(inputConnector connector.Connector[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
+func NewKafkaStage(inputConnector msgConn[*KafkaMessage], cfg *KafkaConfig) *KafkaStage {
 	return &KafkaStage{
 		stage: newStage("kafka", inputConnector, newKafkaWorkerInstMaker(), cfg.Stage),
 

@@ -27,12 +27,12 @@ type UDPConfig struct {
 	// IPAddr is the IP address to listen on.
 	//
 	// Default: 0.0.0.0
-	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+	IPAddr string
 
 	// Port is the port to listen on.
 	//
 	// Default: 20_000
-	Port uint16 `yaml:"port" json:"port"`
+	Port uint16
 }
 
 // DefaultUDPConfig returns the default configuration for the UDP stage.
@@ -47,7 +47,7 @@ func DefaultUDPConfig() *UDPConfig {
 //  MESSAGE  //
 ///////////////
 
-var _ message.Serializable = (*UDPMessage)(nil)
+var _ msgSer = (*UDPMessage)(nil)
 
 var udpMessagePool = sync.Pool{
 	New: func() any {
@@ -59,8 +59,6 @@ var udpMessagePool = sync.Pool{
 
 // UDPMessage represents a UDP message.
 type UDPMessage struct {
-	message.Base
-
 	// Payload of the UDP datagram.
 	Payload []byte
 	// PayloadSize is the number of bytes of the payload.
@@ -129,7 +127,7 @@ func (us *udpSource) initMetrics() {
 	us.tel.NewCounter("received_bytes", func() int64 { return us.receivedBytes.Load() })
 }
 
-func (us *udpSource) Run(ctx context.Context, outConnector conn[*UDPMessage]) {
+func (us *udpSource) Run(ctx context.Context, outConnector msgConn[*UDPMessage]) {
 	// Hacky method to close the connection when the context is done
 	go func() {
 		<-ctx.Done()
@@ -168,7 +166,7 @@ func (us *udpSource) Run(ctx context.Context, outConnector conn[*UDPMessage]) {
 	}
 }
 
-func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
+func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *msg[*UDPMessage] {
 	// Create the trace for the incoming datagram
 	_, span := us.tel.NewTrace(ctx, "receive UDP datagram")
 	defer span.End()
@@ -181,20 +179,22 @@ func (us *udpSource) handleBuf(ctx context.Context, buf []byte) *UDPMessage {
 	udpMsg.PayloadSize = payloadSize
 	copy(udpMsg.Payload, buf)
 
+	msg := message.NewMessage(udpMsg)
+
 	// Set the receive time and the timestamp
 	recvTime := time.Now()
-	udpMsg.SetReceiveTime(recvTime)
-	udpMsg.SetTimestamp(recvTime)
+	msg.SetReceiveTime(recvTime)
+	msg.SetTimestamp(recvTime)
 
 	// Save the span into the message
 	span.SetAttributes(attribute.Int("payload_size", payloadSize))
-	udpMsg.SaveSpan(span)
+	msg.SaveSpan(span)
 
 	// Update metrics
 	us.receivedBytes.Add(int64(payloadSize))
 	us.receivedMessages.Add(1)
 
-	return udpMsg
+	return msg
 }
 
 /////////////
@@ -211,7 +211,7 @@ type UDPStage struct {
 }
 
 // NewUDPStage returns a new UDP stage.
-func NewUDPStage(outputConnector conn[*UDPMessage], cfg *UDPConfig) *UDPStage {
+func NewUDPStage(outputConnector msgConn[*UDPMessage], cfg *UDPConfig) *UDPStage {
 	source := newUDPSource()
 
 	return &UDPStage{

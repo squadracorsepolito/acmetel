@@ -6,7 +6,10 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/message"
 )
 
-type msg = message.Message
+type msgEnv = message.Envelope
+
+type msg[T msgEnv] = message.Message[T]
+
 type msgSer = message.Serializable
 
-type conn[T any] = connector.Connector[T]
+type msgConn[T msgEnv] = connector.Connector[*msg[T]]

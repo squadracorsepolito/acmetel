@@ -15,14 +15,14 @@ import (
 //  INSTANCE  //
 ////////////////
 
-type workerInstance[Args any, In msg] interface {
+type workerInstance[Args any, In msgEnv] interface {
 	Init(ctx context.Context, args Args) error
 	Close(ctx context.Context) error
 	SetTelemetry(tel *internal.Telemetry)
-	Deliver(ctx context.Context, task In) error
+	Deliver(ctx context.Context, task *msg[In]) error
 }
 
-type workerInstanceMaker[Args any, In msg] func() workerInstance[Args, In]
+type workerInstanceMaker[Args any, In msgEnv] func() workerInstance[Args, In]
 
 ///////////////
 //  METRICS  //
@@ -66,7 +66,7 @@ func (wm *workerMetrics) recordTotalMessageProcessingTime(ctx context.Context, r
 //  WORKER  //
 //////////////
 
-type worker[Args any, In msg] struct {
+type worker[Args any, In msgEnv] struct {
 	tel *internal.Telemetry
 
 	id   int
@@ -75,7 +75,7 @@ type worker[Args any, In msg] struct {
 	metrics *workerMetrics
 }
 
-func newWorker[Args any, In msg](
+func newWorker[Args any, In msgEnv](
 	tel *internal.Telemetry, id int, inst workerInstance[Args, In], metrics *workerMetrics,
 ) *worker[Args, In] {
 
@@ -102,16 +102,18 @@ func (w *worker[Args, In]) init(ctx context.Context, args Args) error {
 	return w.inst.Init(ctx, args)
 }
 
-func (w *worker[Args, In]) deliver(ctx context.Context, msgIn In) {
+func (w *worker[Args, In]) deliver(ctx context.Context, msgIn *msg[In]) {
 	defer msgIn.Destroy()
 
-	w.metrics.incrementDeliveredMessages()
+	// Extract the span context from the input message
+	ctx = msgIn.LoadSpanContext(ctx)
 
 	if err := w.inst.Deliver(ctx, msgIn); err != nil {
 		w.tel.LogError("failed to deliver message", err, "worker_id", w.id)
 		w.metrics.incrementDeliveringErrors()
 	}
 
+	w.metrics.incrementDeliveredMessages()
 	w.metrics.recordTotalMessageProcessingTime(ctx, msgIn.GetReceiveTime())
 }
 
@@ -127,7 +129,7 @@ func (w *worker[Args, In]) close(ctx context.Context) {
 //  POOL  //
 ////////////
 
-type workerPool[Args any, In msg] struct {
+type workerPool[Args any, In msgEnv] struct {
 	tel *internal.Telemetry
 
 	cfg *pool.Config
@@ -139,12 +141,12 @@ type workerPool[Args any, In msg] struct {
 
 	wg *sync.WaitGroup
 
-	fanOut *pool.FanOut[In]
+	fanOut *pool.FanOut[*msg[In]]
 
 	metrics *workerMetrics
 }
 
-func newWorkerPool[Args any, In msg](
+func newWorkerPool[Args any, In msgEnv](
 	tel *internal.Telemetry, workerInstMaker workerInstanceMaker[Args, In], cfg *pool.Config,
 ) *workerPool[Args, In] {
 
@@ -159,7 +161,7 @@ func newWorkerPool[Args any, In msg](
 
 		wg: &sync.WaitGroup{},
 
-		fanOut: pool.NewFanOut[In](cfg.InputQueueSize),
+		fanOut: pool.NewFanOut[*msg[In]](cfg.InputQueueSize),
 
 		metrics: newWorkerMetrics(tel),
 	}
@@ -244,7 +246,7 @@ func (wp *workerPool[Args, In]) close() {
 	wp.scaler.Close()
 }
 
-func (wp *workerPool[Args, In]) addMessage(ctx context.Context, msgIn In) error {
+func (wp *workerPool[Args, In]) addMessage(ctx context.Context, msgIn *msg[In]) error {
 	if err := wp.fanOut.AddTask(ctx, msgIn); err != nil {
 		return err
 	}

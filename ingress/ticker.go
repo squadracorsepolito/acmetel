@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,7 +19,7 @@ type TickerConfig struct {
 	// Interval is the duration between ticks.
 	//
 	// Default: 100ms
-	Interval time.Duration `yaml:"interval" json:"interval"`
+	Interval time.Duration
 }
 
 // DefaultTickerConfig returns the default configuration for the Ticker stage.
@@ -34,16 +33,19 @@ func DefaultTickerConfig() *TickerConfig {
 //  MESSAGE  //
 ///////////////
 
+var _ msgEnv = (*TickerMessage)(nil)
+
 // TickerMessage is the message returned by the Ticker stage.
 type TickerMessage struct {
-	message.Base
-
 	TickNumber int
 }
 
 func newTickerMessage() *TickerMessage {
 	return &TickerMessage{}
 }
+
+// Destroy cleans up the message.
+func (tm *TickerMessage) Destroy() {}
 
 //////////////
 //  SOURCE  //
@@ -72,7 +74,7 @@ func (ts *tickerSource) init(interval time.Duration) {
 	ts.ticker = time.NewTicker(interval)
 }
 
-func (ts *tickerSource) Run(ctx context.Context, outConnector conn[*TickerMessage]) {
+func (ts *tickerSource) Run(ctx context.Context, outConnector msgConn[*TickerMessage]) {
 	ticks := 0
 
 	for {
@@ -89,17 +91,17 @@ func (ts *tickerSource) Run(ctx context.Context, outConnector conn[*TickerMessag
 	}
 }
 
-func (ts *tickerSource) handleTrigger(ctx context.Context, tick int) *TickerMessage {
+func (ts *tickerSource) handleTrigger(ctx context.Context, tick int) *msg[*TickerMessage] {
 	_, span := ts.tel.NewTrace(ctx, "triggered ticker message")
 	defer span.End()
 
-	msg := newTickerMessage()
+	tickerMsg := newTickerMessage()
+	tickerMsg.TickNumber = tick
 
+	msg := message.NewMessage(tickerMsg)
 	triggerTime := time.Now()
 	msg.SetReceiveTime(triggerTime)
 	msg.SetTimestamp(triggerTime)
-
-	msg.TickNumber = tick
 
 	span.SetAttributes(attribute.Int("tick_number", tick))
 	msg.SaveSpan(span)
@@ -121,7 +123,7 @@ type TickerStage struct {
 }
 
 // NewTickerStage returns a new Ticker stage.
-func NewTickerStage(outConnector connector.Connector[*TickerMessage], cfg *TickerConfig) *TickerStage {
+func NewTickerStage(outConnector msgConn[*TickerMessage], cfg *TickerConfig) *TickerStage {
 	source := newTickerSource()
 
 	return &TickerStage{

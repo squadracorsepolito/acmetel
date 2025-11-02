@@ -22,7 +22,7 @@ func getConnectorFormKind[T any](connKind string, size uint64) Connector[T] {
 	case "channel":
 		connector = NewChannel[T](size)
 	case "ring_buffer":
-		connector = NewRingBuffer[T](uint32(size))
+		connector = newRingBuffer[T](uint32(size))
 	}
 	return connector
 }

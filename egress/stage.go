@@ -11,15 +11,15 @@ import (
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
-type stage[WArgs any, In msg] interface {
+type stage[WArgs any, In msgEnv] interface {
 	Init(ctx context.Context, workerArgs WArgs) error
 	Run(ctx context.Context)
 	Close()
 	Tel() *internal.Telemetry
 }
 
-func newStage[WArgs any, In msg](
-	name string, inConn conn[In], workerInstMaker workerInstanceMaker[WArgs, In], cfg *stageCommon.Config,
+func newStage[WArgs any, In msgEnv](
+	name string, inConn msgConn[In], workerInstMaker workerInstanceMaker[WArgs, In], cfg *stageCommon.Config,
 ) stage[WArgs, In] {
 
 	switch cfg.RunningMode {
@@ -36,13 +36,13 @@ func newStage[WArgs any, In msg](
 //  BASE  //
 ////////////
 
-type stageBase[WArgs any, In msg] struct {
+type stageBase[WArgs any, In msgEnv] struct {
 	tel *internal.Telemetry
 
-	inputConnector conn[In]
+	inputConnector msgConn[In]
 }
 
-func newStageBase[WArgs any, In msg](name string, inConn conn[In]) *stageBase[WArgs, In] {
+func newStageBase[WArgs any, In msgEnv](name string, inConn msgConn[In]) *stageBase[WArgs, In] {
 	return &stageBase[WArgs, In]{
 		tel: internal.NewTelemetry("egress", name),
 
@@ -70,14 +70,14 @@ func (s *stageBase[WArgs, In]) Tel() *internal.Telemetry {
 //  SINGLE  //
 //////////////
 
-type stageSingle[WArgs any, In msg] struct {
+type stageSingle[WArgs any, In msgEnv] struct {
 	*stageBase[WArgs, In]
 
 	worker *worker[WArgs, In]
 }
 
-func newStageSingle[WArgs any, In msg](
-	name string, inConn conn[In], workerInstMaker workerInstanceMaker[WArgs, In],
+func newStageSingle[WArgs any, In msgEnv](
+	name string, inConn msgConn[In], workerInstMaker workerInstanceMaker[WArgs, In],
 ) *stageSingle[WArgs, In] {
 
 	stageBase := newStageBase[WArgs](name, inConn)
@@ -140,14 +140,14 @@ func (s *stageSingle[WArgs, In]) Close() {
 //  POOL  //
 ////////////
 
-type stagePool[WArgs any, In msg] struct {
+type stagePool[WArgs any, In msgEnv] struct {
 	*stageBase[WArgs, In]
 
 	workerPool *workerPool[WArgs, In]
 }
 
-func newStagePool[WArgs any, In msg](
-	name string, inConn conn[In], workerInstMaker workerInstanceMaker[WArgs, In], cfg *pool.Config,
+func newStagePool[WArgs any, In msgEnv](
+	name string, inConn msgConn[In], workerInstMaker workerInstanceMaker[WArgs, In], cfg *pool.Config,
 ) *stagePool[WArgs, In] {
 
 	stageBase := newStageBase[WArgs](name, inConn)

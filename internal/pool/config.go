@@ -11,54 +11,54 @@ type Config struct {
 	// AutoScaleEnabled states whether the worker pool should scale automatically.
 	//
 	// Default: true
-	AutoScaleEnabled bool `yaml:"auto_scale_enabled" json:"auto_scale_enabled"`
+	AutoScaleEnabled bool
 
 	// InitialWorkers is the initial number of workers.
 	//
 	// Default: 1
-	InitialWorkers int `yaml:"initial_workers" json:"initial_workers"`
+	InitialWorkers int
 
 	// MinWorkers is the minimum number of workers.
 	//
 	// Default: 1
-	MinWorkers int `yaml:"min_workers" json:"min_workers"`
+	MinWorkers int
 	// MaxWorkers is the maximum number of workers.
 	//
 	// Default: number of CPUs
-	MaxWorkers int `yaml:"max_workers" json:"max_workers"`
+	MaxWorkers int
 
 	// InputQueueSize is the size of the queue that holds messages to be processed
 	// by the workers. It is basically the size of the buffer used to fan out the
 	// messages to the workers.
 	//
 	// Default: 512
-	InputQueueSize int `yaml:"input_queue_size" json:"input_queue_size"`
+	InputQueueSize int
 
 	// OutputQueueSize is the size of the queue that holds messages which have been
 	// processed by the workers. It is basically the size of the buffer used to fan in
 	// the messages from the workers. It is NOT used by the egress stage.
 	//
 	// Default: 512
-	OutputQueueSize int `yaml:"output_queue_size" json:"output_queue_size"`
+	OutputQueueSize int
 
 	// QueueDepthPerWorker is the target length of the task queue per worker.
 	//
 	// Default: 64
-	QueueDepthPerWorker int `yaml:"queue_depth_per_worker" json:"queue_depth_per_worker"`
+	QueueDepthPerWorker int
 
 	// ScaleDownFactor is the factor by which to scale down the number of workers.
 	//
 	// Default: 0.1
-	ScaleDownFactor float64 `yaml:"scale_down_factor" json:"scale_down_factor"`
+	ScaleDownFactor float64
 	// ScaleDownBackoff is the factor by which to increase the time to scale down.
 	//
 	// Default: 1.5
-	ScaleDownBackoff float64 `yaml:"scale_down_backoff" json:"scale_down_backoff"`
+	ScaleDownBackoff float64
 
 	// AutoScaleInterval is the interval at which the auto scaler is triggered.
 	//
 	// Default: 3 seconds
-	AutoScaleInterval time.Duration `yaml:"auto_scale_interval" json:"auto_scale_interval"`
+	AutoScaleInterval time.Duration
 }
 
 // DefaultConfig returns the default configuration for the worker pool.

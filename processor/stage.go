@@ -12,14 +12,14 @@ import (
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
-type stage[WArgs any, In, Out msg] interface {
+type stage[WArgs any, In, Out msgEnv] interface {
 	Init(ctx context.Context, workerArgs WArgs) error
 	Run(ctx context.Context)
 	Close()
 }
 
-func newStage[WArgs any, In, Out msg](
-	name string, inConn conn[In], outConn conn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out], cfg *stageCommon.Config,
+func newStage[WArgs any, In, Out msgEnv](
+	name string, inConn msgConn[In], outConn msgConn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out], cfg *stageCommon.Config,
 ) stage[WArgs, In, Out] {
 
 	switch cfg.RunningMode {
@@ -36,14 +36,14 @@ func newStage[WArgs any, In, Out msg](
 //  BASE  //
 ////////////
 
-type stageBase[WArgs any, In, Out msg] struct {
+type stageBase[WArgs any, In, Out msgEnv] struct {
 	tel *internal.Telemetry
 
-	inputConnector  conn[In]
-	outputConnector conn[Out]
+	inputConnector  msgConn[In]
+	outputConnector msgConn[Out]
 }
 
-func newStageBase[WArgs any, In, Out msg](name string, inConn conn[In], outConn conn[Out]) *stageBase[WArgs, In, Out] {
+func newStageBase[WArgs any, In, Out msgEnv](name string, inConn msgConn[In], outConn msgConn[Out]) *stageBase[WArgs, In, Out] {
 	return &stageBase[WArgs, In, Out]{
 		tel: internal.NewTelemetry("processor", name),
 
@@ -71,14 +71,14 @@ func (s *stageBase[WArgs, In, Out]) close() {
 //  SINGLE  //
 //////////////
 
-type stageSingle[WArgs any, In, Out msg] struct {
+type stageSingle[WArgs any, In, Out msgEnv] struct {
 	*stageBase[WArgs, In, Out]
 
 	worker *worker[WArgs, In, Out]
 }
 
-func newStageSingle[WArgs any, In, Out msg](
-	name string, inConn conn[In], outConn conn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out],
+func newStageSingle[WArgs any, In, Out msgEnv](
+	name string, inConn msgConn[In], outConn msgConn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out],
 ) *stageSingle[WArgs, In, Out] {
 
 	stageBase := newStageBase[WArgs](name, inConn, outConn)
@@ -146,15 +146,15 @@ func (s *stageSingle[WArgs, In, Out]) Close() {
 //  POOL  //
 ////////////
 
-type stagePool[WArgs any, In, Out msg] struct {
+type stagePool[WArgs any, In, Out msgEnv] struct {
 	*stageBase[WArgs, In, Out]
 
 	writerWg   *sync.WaitGroup
 	workerPool *workerPool[WArgs, In, Out]
 }
 
-func newStagePool[WArgs any, In, Out msg](
-	name string, inConn conn[In], outConn conn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out], cfg *pool.Config,
+func newStagePool[WArgs any, In, Out msgEnv](
+	name string, inConn msgConn[In], outConn msgConn[Out], workerInstMaker workerInstanceMaker[WArgs, In, Out], cfg *pool.Config,
 ) *stagePool[WArgs, In, Out] {
 
 	stageBase := newStageBase[WArgs](name, inConn, outConn)

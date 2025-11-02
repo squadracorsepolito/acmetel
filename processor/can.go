@@ -17,12 +17,14 @@ import (
 //  CONFIG  //
 //////////////
 
+// CANConfig structs contains the configuration for the CAN processor stage.
 type CANConfig struct {
 	Stage *stageCommon.Config
 
 	Messages []*acmelib.Message
 }
 
+// DefaultCANConfig returns the default configuration for the CAN processor stage.
 func DefaultCANConfig(runningMode stageCommon.RunningMode) *CANConfig {
 	return &CANConfig{
 		Stage: stageCommon.DefaultConfig(runningMode),
@@ -38,7 +40,7 @@ func DefaultCANConfig(runningMode stageCommon.RunningMode) *CANConfig {
 // CANMessageCarrier interface defines the common methods
 // for all message types that carry CAN messages.
 type CANMessageCarrier interface {
-	message.Message
+	msgEnv
 
 	// GetRawMessages returns the list of raw CAN messages.
 	GetRawMessages() []CANRawMessage
@@ -92,11 +94,11 @@ type CANSignal struct {
 	ValueEnum string
 }
 
+var _ msgEnv = (*CANMessage)(nil)
+
 // CANMessage represents a decoded CAN message.
 // It only contains the value of the signals of every message.
 type CANMessage struct {
-	message.Base
-
 	// Signals is the list of decoded signals.
 	Signals []CANSignal
 	// SignalCount is the number of decoded signals.
@@ -109,6 +111,9 @@ func newCANMessage() *CANMessage {
 		Signals:     []CANSignal{},
 	}
 }
+
+// Destroy cleans up the message.
+func (cm *CANMessage) Destroy() {}
 
 ///////////////
 //  DECODER  //
@@ -218,15 +223,14 @@ func (cw *canWorker[T]) Init(_ context.Context, args *canWorkerArgs) error {
 	return nil
 }
 
-func (cw *canWorker[T]) Handle(ctx context.Context, msgIn T) (*CANMessage, error) {
-	// Extract the span context from the input message
-	ctx, span := cw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle CAN message batch")
+func (cw *canWorker[T]) Handle(ctx context.Context, msgIn *msg[T]) (*msg[*CANMessage], error) {
+	ctx, span := cw.Tel.NewTrace(ctx, "handle CAN message batch")
 	defer span.End()
 
 	// Create the CAN message
 	canMsg := newCANMessage()
 
-	rawMessages := msgIn.GetRawMessages()
+	rawMessages := msgIn.GetEnvelope().GetRawMessages()
 	rawMsgCount := len(rawMessages)
 
 	for _, msg := range rawMessages {
@@ -269,13 +273,15 @@ func (cw *canWorker[T]) Handle(ctx context.Context, msgIn T) (*CANMessage, error
 
 	// Save the span in the message
 	span.SetAttributes(attribute.Int("signal_count", canMsg.SignalCount))
-	canMsg.SaveSpan(span)
+
+	msgOut := message.NewMessage(canMsg)
+	msgOut.SaveSpan(span)
 
 	// Update metrics
 	cw.metrics.addCANMessages(rawMsgCount)
 	cw.metrics.addCANSignals(canMsg.SignalCount)
 
-	return canMsg, nil
+	return msgOut, nil
 }
 
 func (cw *canWorker[T]) Close(_ context.Context) error {
@@ -286,13 +292,15 @@ func (cw *canWorker[T]) Close(_ context.Context) error {
 //  STAGE  //
 /////////////
 
+// CANStage is a processor stage that decodes CAN messages.
 type CANStage[T CANMessageCarrier] struct {
 	stage[*canWorkerArgs, T, *CANMessage]
 
 	cfg *CANConfig
 }
 
-func NewCANStage[T CANMessageCarrier](inputConnector conn[T], outputConnector conn[*CANMessage], cfg *CANConfig) *CANStage[T] {
+// NewCANStage returns a new CAN processor stage.
+func NewCANStage[T CANMessageCarrier](inputConnector msgConn[T], outputConnector msgConn[*CANMessage], cfg *CANConfig) *CANStage[T] {
 	return &CANStage[T]{
 		stage: newStage(
 			"can", inputConnector, outputConnector, newCANWorkerInstMaker[T](), cfg.Stage,
@@ -302,6 +310,7 @@ func NewCANStage[T CANMessageCarrier](inputConnector conn[T], outputConnector co
 	}
 }
 
+// Init initializes the stage.
 func (cs *CANStage[T]) Init(ctx context.Context) error {
 	decoder := newCANDecoder(cs.cfg.Messages)
 

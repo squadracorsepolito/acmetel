@@ -4,11 +4,17 @@ import (
 	"github.com/squadracorsepolito/acmetel/internal/rb"
 )
 
-type RingBuffer[T any] = rb.RingBuffer[T]
-
+// ErrClosed is returned when the ring buffer is closed.
 var ErrClosed = rb.ErrClosed
+
+// ErrReadTimeout is returned when the ring buffer is empty and the read operation times out.
 var ErrReadTimeout = rb.ErrReadTimeout
 
-func NewRingBuffer[T any](capacity uint32) *RingBuffer[T] {
+func newRingBuffer[T any](capacity uint32) *RingBuffer[T] {
 	return rb.NewRingBuffer[T](capacity, rb.BufferKindSPSC)
+}
+
+// NewRingBuffer returns a new lock-free spsc generic ring buffer.
+func NewRingBuffer[T msgVal](capacity uint32) *RingBuffer[*msgWrap[T]] {
+	return newRingBuffer[*msgWrap[T]](capacity)
 }

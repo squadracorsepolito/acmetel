@@ -10,9 +10,7 @@ import (
 	"time"
 
 	qdb "github.com/questdb/go-questdb-client/v3"
-	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
-	"github.com/squadracorsepolito/acmetel/internal/message"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,7 +27,7 @@ type QuestDBConfig struct {
 	// Address of the QuestDB server.
 	//
 	// Default: "localhost:9000"
-	Address string `json:"address"`
+	Address string
 }
 
 // DefaultQuestDBConfig returns the default configuration for the QuestDB egress stage.
@@ -44,14 +42,17 @@ func DefaultQuestDBConfig(runningMode stageCommon.RunningMode) *QuestDBConfig {
 //  MESSAGE  //
 ///////////////
 
+var _ msgEnv = (*QuestDBMessage)(nil)
+
 // QuestDBMessage represents a QuestDB message.
 // It contains the definition of the rows and columns to be inserted
 // into the database.
 type QuestDBMessage struct {
-	message.Base
-
 	rows []*QuestDBRow
 }
+
+// Destroy cleans up the message.
+func (qm *QuestDBMessage) Destroy() {}
 
 // AddRow adds a row to the message.
 func (qm *QuestDBMessage) AddRow(row *QuestDBRow) {
@@ -299,10 +300,12 @@ func (qw *questDBWorker) Init(ctx context.Context, args *questDBWorkerArgs) erro
 	return nil
 }
 
-func (qw *questDBWorker) Deliver(ctx context.Context, qdbMsg *QuestDBMessage) error {
-	// Extract the span context from the input message
-	ctx, span := qw.Tel.NewTrace(qdbMsg.LoadSpanContext(ctx), "deliver QuestDB rows")
+func (qw *questDBWorker) Deliver(ctx context.Context, msgIn *msg[*QuestDBMessage]) error {
+	ctx, span := qw.Tel.NewTrace(ctx, "deliver QuestDB rows")
 	defer span.End()
+
+	qdbMsg := msgIn.GetEnvelope()
+	timestamp := msgIn.GetTimestamp()
 
 	tmpInsRows := 0
 	for row := range qdbMsg.iterRows() {
@@ -329,7 +332,7 @@ func (qw *questDBWorker) Deliver(ctx context.Context, qdbMsg *QuestDBMessage) er
 			}
 		}
 
-		if err := query.At(ctx, qdbMsg.GetTimestamp()); err != nil {
+		if err := query.At(ctx, timestamp); err != nil {
 			return err
 		}
 
@@ -368,7 +371,7 @@ type QuestDBStage struct {
 }
 
 // NewQuestDBStage returns a new QuestDB egress stage.
-func NewQuestDBStage(inputConnector connector.Connector[*QuestDBMessage], cfg *QuestDBConfig) *QuestDBStage {
+func NewQuestDBStage(inputConnector msgConn[*QuestDBMessage], cfg *QuestDBConfig) *QuestDBStage {
 	return &QuestDBStage{
 		stage: newStage("questdb", inputConnector, newQuestDBWorkerInstMaker(), cfg.Stage),
 

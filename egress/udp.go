@@ -24,12 +24,12 @@ type UDPConfig struct {
 	// IPAddr is the destination IP address.
 	//
 	// Default: 127.0.0.1
-	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+	IPAddr string
 
 	// Port is the destination port.
 	//
 	// Default: 20_000
-	Port uint16 `yaml:"port" json:"port"`
+	Port uint16
 }
 
 // DefaultUDPConfig returns the default configuration for the UDP egress stage.
@@ -110,10 +110,11 @@ func (uw *udpWorker[T]) Init(_ context.Context, args *udpWorkerArgs) error {
 	return nil
 }
 
-func (uw *udpWorker[T]) Deliver(ctx context.Context, udpMsg T) error {
-	// Extract the span context from the input message
-	_, span := uw.Tel.NewTrace(udpMsg.LoadSpanContext(ctx), "deliver UDP message")
+func (uw *udpWorker[T]) Deliver(ctx context.Context, msgIn *msg[T]) error {
+	_, span := uw.Tel.NewTrace(ctx, "deliver UDP message")
 	defer span.End()
+
+	udpMsg := msgIn.GetEnvelope()
 
 	payload := udpMsg.GetBytes()
 	payloadSize := len(payload)
@@ -149,7 +150,7 @@ type UDPStage[T msgSer] struct {
 }
 
 // NewUDPStage returns a new UDP egress stage.
-func NewUDPStage[T msgSer](inputConnector conn[T], cfg *UDPConfig) *UDPStage[T] {
+func NewUDPStage[T msgSer](inputConnector msgConn[T], cfg *UDPConfig) *UDPStage[T] {
 	return &UDPStage[T]{
 		stage: newStage(
 			"udp", inputConnector, newUDPWorkerInstMaker[T](), cfg.Stage,

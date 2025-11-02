@@ -13,14 +13,14 @@ import (
 //  INSTANCE  //
 ////////////////
 
-type workerInstance[Args any, In, Out msg] interface {
+type workerInstance[Args any, In, Out msgEnv] interface {
 	Init(ctx context.Context, args Args) error
 	Close(ctx context.Context) error
 	SetTelemetry(tel *internal.Telemetry)
-	Handle(ctx context.Context, task In) (Out, error)
+	Handle(ctx context.Context, task *msg[In]) (*msg[Out], error)
 }
 
-type workerInstanceMaker[Args any, In, Out msg] func() workerInstance[Args, In, Out]
+type workerInstanceMaker[Args any, In, Out msgEnv] func() workerInstance[Args, In, Out]
 
 ///////////////
 //  METRICS  //
@@ -62,7 +62,7 @@ func (wm *workerMetrics) incrementProcessingErrors() {
 //  WORKER  //
 //////////////
 
-type worker[Args any, In, Out msg] struct {
+type worker[Args any, In, Out msgEnv] struct {
 	tel *internal.Telemetry
 
 	id   int
@@ -71,7 +71,7 @@ type worker[Args any, In, Out msg] struct {
 	metrics *workerMetrics
 }
 
-func newWorker[Args any, In, Out msg](
+func newWorker[Args any, In, Out msgEnv](
 	tel *internal.Telemetry, id int, inst workerInstance[Args, In, Out], metrics *workerMetrics,
 ) *worker[Args, In, Out] {
 	return &worker[Args, In, Out]{
@@ -97,10 +97,13 @@ func (w *worker[Args, In, Out]) init(ctx context.Context, args Args) error {
 	return w.inst.Init(ctx, args)
 }
 
-func (w *worker[Args, In, Out]) process(ctx context.Context, msgIn In) (Out, bool) {
+func (w *worker[Args, In, Out]) process(ctx context.Context, msgIn *msg[In]) (*msg[Out], bool) {
 	defer msgIn.Destroy()
 
 	w.metrics.incrementProcessedMessages()
+
+	// Extract the span context from the input message
+	ctx = msgIn.LoadSpanContext(ctx)
 
 	msgOut, err := w.inst.Handle(ctx, msgIn)
 	if err != nil {
@@ -136,7 +139,7 @@ func (w *worker[Args, In, Out]) close(ctx context.Context) {
 //  POOL  //
 ////////////
 
-type workerPool[WArgs any, In, Out msg] struct {
+type workerPool[WArgs any, In, Out msgEnv] struct {
 	tel *internal.Telemetry
 
 	cfg *pool.Config
@@ -148,13 +151,13 @@ type workerPool[WArgs any, In, Out msg] struct {
 
 	wg *sync.WaitGroup
 
-	fanOut *pool.FanOut[In]
-	fanIn  *pool.FanIn[Out]
+	fanOut *pool.FanOut[*msg[In]]
+	fanIn  *pool.FanIn[*msg[Out]]
 
 	metrics *workerMetrics
 }
 
-func newWorkerPool[WArgs any, In, Out msg](
+func newWorkerPool[WArgs any, In, Out msgEnv](
 	tel *internal.Telemetry, workerInstMaker workerInstanceMaker[WArgs, In, Out], cfg *pool.Config,
 ) *workerPool[WArgs, In, Out] {
 
@@ -169,8 +172,8 @@ func newWorkerPool[WArgs any, In, Out msg](
 
 		wg: &sync.WaitGroup{},
 
-		fanOut: pool.NewFanOut[In](cfg.InputQueueSize),
-		fanIn:  pool.NewFanIn[Out](cfg.OutputQueueSize),
+		fanOut: pool.NewFanOut[*msg[In]](cfg.InputQueueSize),
+		fanIn:  pool.NewFanIn[*msg[Out]](cfg.OutputQueueSize),
 
 		metrics: newWorkerMetrics(tel),
 	}
@@ -263,7 +266,7 @@ func (wp *workerPool[WArgs, In, Out]) close() {
 	wp.fanIn.Close()
 }
 
-func (wp *workerPool[WArgs, In, Out]) addMessage(ctx context.Context, msgIn In) error {
+func (wp *workerPool[WArgs, In, Out]) addMessage(ctx context.Context, msgIn *msg[In]) error {
 	if err := wp.fanOut.AddTask(ctx, msgIn); err != nil {
 		return err
 	}
@@ -273,6 +276,6 @@ func (wp *workerPool[WArgs, In, Out]) addMessage(ctx context.Context, msgIn In) 
 	return nil
 }
 
-func (wp *workerPool[WArgs, In, Out]) extractMessage() (Out, error) {
+func (wp *workerPool[WArgs, In, Out]) extractMessage() (*msg[Out], error) {
 	return wp.fanIn.ReadTask()
 }

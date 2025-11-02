@@ -25,17 +25,17 @@ type TCPConfig struct {
 	// IPAddr is the destination IP address.
 	//
 	// Default: 127.0.0.1
-	IPAddr string `yaml:"ip_addr" json:"ip_addr"`
+	IPAddr string
 
 	// Port is the destination port.
 	//
 	// Default: 20_000
-	Port uint16 `yaml:"port" json:"port"`
+	Port uint16
 
 	// WriteTimeout is the timeout for writing messages to the TCP connection.
 	//
 	// Default: 10s
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	WriteTimeout time.Duration
 }
 
 // DefaultTCPConfig returns a default TCPConfig.
@@ -120,9 +120,8 @@ func (tw *tcpWorker[T]) Init(_ context.Context, args *tcpWorkerArgs) error {
 	return nil
 }
 
-func (tw *tcpWorker[T]) Deliver(ctx context.Context, msg T) error {
-	// Extract the span context from the input message
-	_, span := tw.Tel.NewTrace(msg.LoadSpanContext(ctx), "deliver TCP message")
+func (tw *tcpWorker[T]) Deliver(ctx context.Context, msgIn *msg[T]) error {
+	_, span := tw.Tel.NewTrace(ctx, "deliver TCP message")
 	defer span.End()
 
 	// Set the write timeout
@@ -130,13 +129,15 @@ func (tw *tcpWorker[T]) Deliver(ctx context.Context, msg T) error {
 		return err
 	}
 
-	tcpMsg := msg.GetBytes()
-	deliveredBytes, err := tw.conn.Write(tcpMsg)
+	tcpMsg := msgIn.GetEnvelope()
+
+	tcpMsgRaw := tcpMsg.GetBytes()
+	deliveredBytes, err := tw.conn.Write(tcpMsgRaw)
 	if err != nil {
 		return err
 	}
 
-	span.SetAttributes(attribute.Int("message_size", len(tcpMsg)))
+	span.SetAttributes(attribute.Int("message_size", len(tcpMsgRaw)))
 
 	// Update metrics
 	tw.metrics.addDeliveredBytes(deliveredBytes)
@@ -162,7 +163,7 @@ type TCPStage[T msgSer] struct {
 }
 
 // NewTCPStage returns a new TCP egress stage.
-func NewTCPStage[T msgSer](inputConnector conn[T], cfg *TCPConfig) *TCPStage[T] {
+func NewTCPStage[T msgSer](inputConnector msgConn[T], cfg *TCPConfig) *TCPStage[T] {
 	return &TCPStage[T]{
 		stage: newStage(
 			"tcp", inputConnector, newTCPWorkerInstMaker[T](), cfg.Stage,

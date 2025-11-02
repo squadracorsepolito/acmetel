@@ -43,8 +43,6 @@ const (
 
 // CannelloniMessage represents a cannelloni CAN message.
 type CannelloniMessage struct {
-	message.Base
-
 	seqNum uint8
 
 	// Messages is the list of CAN messages contained in a cannelloni frame.
@@ -59,6 +57,9 @@ func newCannelloniMessage() *CannelloniMessage {
 		Messages:     make([]CANRawMessage, defaultCANMessageNum),
 	}
 }
+
+// Destroy cleans up the message.
+func (cm *CannelloniMessage) Destroy() {}
 
 // SetSequenceNumber sets the sequence number of the cannelloni frame.
 func (cm *CannelloniMessage) SetSequenceNumber(seqNum uint8) {
@@ -81,18 +82,19 @@ func (cm *CannelloniMessage) AddMessage(msg CANRawMessage) {
 	cm.MessageCount++
 }
 
-var _ message.Serializable = (*CannelloniEncodedMessage)(nil)
+var _ msgSer = (*CannelloniEncodedMessage)(nil)
 
 // CannelloniEncodedMessage represents a cannelloni encoded CAN message.
 type CannelloniEncodedMessage struct {
-	message.Base
-
 	payload []byte
 }
 
 func newCannelloniEncodedMessage() *CannelloniEncodedMessage {
 	return &CannelloniEncodedMessage{}
 }
+
+// Destroy cleans up the message.
+func (cem *CannelloniEncodedMessage) Destroy() {}
 
 // GetBytes returns the encoded bytes of a cannelloni message.
 func (cem *CannelloniEncodedMessage) GetBytes() []byte {
@@ -272,23 +274,18 @@ func (cdw *cannelloniDecoderWorker[T]) Init(_ context.Context, _ any) error {
 	return nil
 }
 
-func (cdw *cannelloniDecoderWorker[T]) Handle(ctx context.Context, msgIn T) (*CannelloniMessage, error) {
-	// Extract the span context from the input message
-	_, span := cdw.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+func (cdw *cannelloniDecoderWorker[T]) Handle(ctx context.Context, msgIn *msg[T]) (*msg[*CannelloniMessage], error) {
+	_, span := cdw.Tel.NewTrace(ctx, "handle cannelloni frame")
 	defer span.End()
 
 	// Decode the frame
-	f, err := cdw.decoder.decode(msgIn.GetBytes())
+	f, err := cdw.decoder.decode(msgIn.GetEnvelope().GetBytes())
 	if err != nil {
 		return nil, err
 	}
 
 	// Create the cannelloni message with the decoded frame data
 	cannelloniMsg := newCannelloniMessage()
-
-	// Set the receive time, but ignore the timestamp
-	// because it will be set by the rob
-	cannelloniMsg.SetReceiveTime(msgIn.GetReceiveTime())
 
 	cannelloniMsg.seqNum = f.sequenceNumber
 
@@ -308,9 +305,11 @@ func (cdw *cannelloniDecoderWorker[T]) Handle(ctx context.Context, msgIn T) (*Ca
 
 	// Save the span into the message
 	span.SetAttributes(attribute.Int("message_count", messageCount))
-	cannelloniMsg.SaveSpan(span)
 
-	return cannelloniMsg, nil
+	msgOut := message.NewMessage(cannelloniMsg)
+	msgOut.SaveSpan(span)
+
+	return msgOut, nil
 }
 
 func (cdw *cannelloniDecoderWorker[T]) Close(_ context.Context) error {
@@ -335,20 +334,22 @@ func (cew *cannelloniEncoderWorker) Init(_ context.Context, _ any) error {
 	return nil
 }
 
-func (cew *cannelloniEncoderWorker) Handle(ctx context.Context, msgIn *CannelloniMessage) (*CannelloniEncodedMessage, error) {
+func (cew *cannelloniEncoderWorker) Handle(ctx context.Context, msgIn *msg[*CannelloniMessage]) (*msg[*CannelloniEncodedMessage], error) {
 	// Extract the span context from the input message
-	_, span := cew.Tel.NewTrace(msgIn.LoadSpanContext(ctx), "handle cannelloni frame")
+	_, span := cew.Tel.NewTrace(ctx, "handle cannelloni frame")
 	defer span.End()
+
+	msgVal := msgIn.GetEnvelope()
 
 	f := &cannelloniFrame{
 		version:        1,
 		opCode:         0,
-		sequenceNumber: msgIn.seqNum,
-		messageCount:   uint16(msgIn.MessageCount),
-		messages:       make([]cannelloniFrameMessage, 0, msgIn.MessageCount),
+		sequenceNumber: msgVal.seqNum,
+		messageCount:   uint16(msgVal.MessageCount),
+		messages:       make([]cannelloniFrameMessage, 0, msgVal.MessageCount),
 	}
 
-	for _, msg := range msgIn.Messages {
+	for _, msg := range msgVal.Messages {
 		f.messages = append(f.messages, cannelloniFrameMessage{
 			canID:   msg.CANID,
 			dataLen: uint8(msg.DataLen),
@@ -360,7 +361,10 @@ func (cew *cannelloniEncoderWorker) Handle(ctx context.Context, msgIn *Cannellon
 	encodedMsg := newCannelloniEncodedMessage()
 	encodedMsg.payload = cew.encoder.encode(f)
 
-	return encodedMsg, nil
+	msgOut := message.NewMessage(encodedMsg)
+	msgOut.SaveSpan(span)
+
+	return msgOut, nil
 }
 
 func (cew *cannelloniEncoderWorker) Close(_ context.Context) error {
@@ -380,7 +384,7 @@ type CannelloniDecoderStage[T msgSer] struct {
 }
 
 // NewCannelloniDecoderStage returns a new cannelloni decoder processor stage.
-func NewCannelloniDecoderStage[T msgSer](inputConnector conn[T], outputConnector conn[*CannelloniMessage], cfg *CannelloniConfig) *CannelloniDecoderStage[T] {
+func NewCannelloniDecoderStage[T msgSer](inputConnector msgConn[T], outputConnector msgConn[*CannelloniMessage], cfg *CannelloniConfig) *CannelloniDecoderStage[T] {
 	return &CannelloniDecoderStage[T]{
 		stage: newStage(
 			"cannelloni", inputConnector, outputConnector, newCannelloniDecoderWorkerInstMaker[T](), cfg.Stage,
@@ -405,7 +409,7 @@ type CannelloniEncoderStage struct {
 
 // NewCannelloniEncoderStage returns a new cannelloni encoder processor stage.
 func NewCannelloniEncoderStage(
-	inputConnector conn[*CannelloniMessage], outputConnector conn[*CannelloniEncodedMessage], cfg *CannelloniConfig,
+	inputConnector msgConn[*CannelloniMessage], outputConnector msgConn[*CannelloniEncodedMessage], cfg *CannelloniConfig,
 ) *CannelloniEncoderStage {
 
 	return &CannelloniEncoderStage{
