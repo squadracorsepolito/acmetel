@@ -398,6 +398,7 @@ loop:
 			outMsg := ts.handleMessage(ctx, msg)
 			outMsg.GetEnvelope().RemoteAddr = conn.RemoteAddr().String()
 			if err := outConnector.Write(outMsg); err != nil {
+				outMsg.Destroy()
 				ts.tel.LogError("failed to write message to output connector", err)
 			}
 

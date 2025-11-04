@@ -120,7 +120,7 @@ func (s *stageSingle[WArgs, In, Out]) Run(ctx context.Context) {
 				return
 			}
 
-			if !errors.Is(err, rb.ErrReadTimeout) {
+			if !errors.Is(err, connector.ErrReadTimeout) {
 				s.tel.LogError("failed to read from input connector", err)
 			}
 
@@ -130,6 +130,7 @@ func (s *stageSingle[WArgs, In, Out]) Run(ctx context.Context) {
 		if msgOut, valid := s.worker.process(ctx, msgIn); valid {
 			// Write the message to the output connector
 			if err := s.outputConnector.Write(msgOut); err != nil {
+				msgOut.Destroy()
 				s.tel.LogError("failed to write into output connector", err)
 			}
 		}

@@ -160,7 +160,9 @@ func (us *udpSource) Run(ctx context.Context, outConnector msgConn[*UDPMessage])
 		}
 
 		// Handle the buffer and send the message
-		if err := outConnector.Write(us.handleBuf(ctx, buf)); err != nil {
+		msgOut := us.handleBuf(ctx, buf)
+		if err := outConnector.Write(msgOut); err != nil {
+			msgOut.Destroy()
 			us.tel.LogError("failed to write message to output connector", err)
 		}
 	}

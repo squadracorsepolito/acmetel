@@ -280,7 +280,9 @@ func (ks *kafkaSource) Run(ctx context.Context, outConnector msgConn[*KafkaMessa
 			continue
 		}
 
-		if err := outConnector.Write(ks.handleMessage(ctx, &msg)); err != nil {
+		msgOut := ks.handleMessage(ctx, &msg)
+		if err := outConnector.Write(msgOut); err != nil {
+			msgOut.Destroy()
 			ks.tel.LogError("failed to write message to output connector", err)
 		}
 

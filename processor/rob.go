@@ -114,7 +114,6 @@ func NewROBStage[T message.ReOrderable](inConnector, outConnector msgConn[T], cf
 // Init initializes the stage.
 func (rs *ROBStage[T]) Init(_ context.Context) error {
 	rs.tel.LogInfo("initializing")
-	defer rs.tel.LogInfo("initialized")
 
 	// Initialize the rob and set the read timeout of
 	// the input connector to the reset timeout
@@ -148,7 +147,6 @@ func (rs *ROBStage[T]) initMetrics() {
 // Run runs the re-order buffer stage.
 func (rs *ROBStage[T]) Run(ctx context.Context) {
 	rs.tel.LogInfo("running")
-	defer rs.tel.LogInfo("stopped")
 
 	resetNeeded := false
 	for {
@@ -159,39 +157,40 @@ func (rs *ROBStage[T]) Run(ctx context.Context) {
 			return
 
 		default:
-			msgIn, err := rs.inputConnector.Read()
-			if err != nil {
-				if errors.Is(err, connector.ErrClosed) {
-					return
+		}
+
+		msgIn, err := rs.inputConnector.Read()
+		if err != nil {
+			if errors.Is(err, connector.ErrClosed) {
+				return
+			}
+
+			// Check if the input connector has timed out
+			if errors.Is(err, connector.ErrReadTimeout) {
+				// Check if the rob has to be reset
+				if resetNeeded {
+					rs.rob.FlushAndReset()
+					rs.resets.Add(1)
+					resetNeeded = false
+
+					rs.tel.LogInfo("resetting and flushing re-order buffer")
 				}
 
-				// Check if the input connector has timed out
-				if errors.Is(err, connector.ErrReadTimeout) {
-					// Check if the rob has to be reset
-					if resetNeeded {
-						rs.rob.FlushAndReset()
-						rs.resets.Add(1)
-						resetNeeded = false
-
-						rs.tel.LogInfo("resetting and flushing re-order buffer")
-					}
-
-					continue
-				}
-
-				rs.tel.LogError("failed to read from input connector", err)
 				continue
 			}
 
-			// Set the sequence number encoded in the message
-			// value into the main message struct
-			msgIn.SetSequenceNumber(msgIn.GetEnvelope().GetSequenceNumber())
-
-			// Try to enqueue the message
-			rs.enqueue(msgIn)
-
-			resetNeeded = true
+			rs.tel.LogError("failed to read from input connector", err)
+			continue
 		}
+
+		// Set the sequence number encoded in the message
+		// value into the main message struct
+		msgIn.SetSequenceNumber(msgIn.GetEnvelope().GetSequenceNumber())
+
+		// Try to enqueue the message
+		rs.enqueue(msgIn)
+
+		resetNeeded = true
 	}
 }
 

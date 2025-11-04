@@ -84,7 +84,9 @@ func (ts *tickerSource) Run(ctx context.Context, outConnector msgConn[*TickerMes
 		case <-ctx.Done():
 			return
 		case <-ts.ticker.C:
-			if err := outConnector.Write(ts.handleTrigger(ctx, ticks)); err != nil {
+			msgOut := ts.handleTrigger(ctx, ticks)
+			if err := outConnector.Write(msgOut); err != nil {
+				msgOut.Destroy()
 				ts.tel.LogError("failed to write message to output connector", err)
 			}
 		}
