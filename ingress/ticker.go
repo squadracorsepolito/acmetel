@@ -66,7 +66,7 @@ func newTickerSource() *tickerSource {
 	return &tickerSource{}
 }
 
-func (ts *tickerSource) SetTelemetry(tel *internal.Telemetry) {
+func (ts *tickerSource) setTelemetry(tel *internal.Telemetry) {
 	ts.tel = tel
 }
 
@@ -74,7 +74,7 @@ func (ts *tickerSource) init(interval time.Duration) {
 	ts.ticker = time.NewTicker(interval)
 }
 
-func (ts *tickerSource) Run(ctx context.Context, outConnector msgConn[*TickerMessage]) {
+func (ts *tickerSource) run(ctx context.Context, outConnector msgConn[*TickerMessage]) {
 	ticks := 0
 
 	for {

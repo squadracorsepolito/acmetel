@@ -5,6 +5,7 @@ go 1.24.0
 ignore ./test/grafana-data
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/lmittmann/tint v1.0.7
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20

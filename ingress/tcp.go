@@ -14,6 +14,7 @@ import (
 
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/message"
+	"github.com/squadracorsepolito/acmetel/internal/pool"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -96,17 +97,26 @@ type TCPConfig struct {
 	// MessageLengthFieldEndianess is the endianess (byte order)
 	// of the message length field when FramingMode is TCPFramingModeLengthPrefixed.
 	MessageLengthFieldEndianess Endianess
+
+	// OutputQueueSize is the size of the output queue
+	// placed between the TCP stage and the output connector.
+	// It is used to convey messages coming from the connection goroutines
+	// to the output connector.
+	//
+	// Default: 512
+	OutputQueueSize int
 }
 
 // DefaultTCPConfig returns a default TCPConfig.
 func DefaultTCPConfig() TCPConfig {
 	return TCPConfig{
-		IPAddr:         "0.0.0.0",
-		Port:           20_000,
-		ReadTimeout:    10 * time.Second,
-		FramingMode:    TCPFramingModeDelimited,
-		MaxMessageSize: 4 * 1024 * 1024,
-		Delimiter:      []byte("\r\n"),
+		IPAddr:          "0.0.0.0",
+		Port:            20_000,
+		ReadTimeout:     10 * time.Second,
+		FramingMode:     TCPFramingModeDelimited,
+		MaxMessageSize:  4 * 1024 * 1024,
+		Delimiter:       []byte("\r\n"),
+		OutputQueueSize: 512,
 	}
 }
 
@@ -145,6 +155,8 @@ func (tm *TCPMessage) GetBytes() []byte {
 var _ source[*TCPMessage] = (*tcpSource)(nil)
 
 type tcpSourceConfig struct {
+	fanInBufferSize int
+
 	readTimeout time.Duration
 
 	framingMode TCPFramingMode
@@ -160,6 +172,8 @@ type tcpSourceConfig struct {
 
 type tcpSource struct {
 	tel *internal.Telemetry
+
+	fanIn *pool.FanIn[*msg[*TCPMessage]]
 
 	wg *sync.WaitGroup
 
@@ -198,6 +212,8 @@ func newTCPSource(cfg *tcpSourceConfig) *tcpSource {
 	}
 
 	return &tcpSource{
+		fanIn: pool.NewFanIn[*msg[*TCPMessage]](cfg.fanInBufferSize),
+
 		wg: &sync.WaitGroup{},
 
 		bufPool: sync.Pool{
@@ -223,7 +239,7 @@ func newTCPSource(cfg *tcpSourceConfig) *tcpSource {
 	}
 }
 
-func (ts *tcpSource) SetTelemetry(tel *internal.Telemetry) {
+func (ts *tcpSource) setTelemetry(tel *internal.Telemetry) {
 	ts.tel = tel
 }
 
@@ -252,13 +268,7 @@ func (ts *tcpSource) initMetrics() {
 	ts.tel.NewCounter("received_messages", func() int64 { return ts.receivedMessages.Load() })
 }
 
-func (ts *tcpSource) Run(ctx context.Context, outConnector msgConn[*TCPMessage]) {
-	// Close the listener when the context is done
-	go func() {
-		<-ctx.Done()
-		ts.listener.Close()
-	}()
-
+func (ts *tcpSource) run(ctx context.Context, outConnector msgConn[*TCPMessage]) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -271,7 +281,6 @@ func (ts *tcpSource) Run(ctx context.Context, outConnector msgConn[*TCPMessage])
 			// Check if the error is because the context is done
 			select {
 			case <-ctx.Done():
-				ts.wg.Wait()
 				return
 
 			default:
@@ -281,14 +290,37 @@ func (ts *tcpSource) Run(ctx context.Context, outConnector msgConn[*TCPMessage])
 		}
 
 		// Spawn a goroutine to handle the connection
-		ts.wg.Add(1)
 		go ts.handleConn(ctx, conn, outConnector)
 	}
 }
 
+func (ts *tcpSource) runBridge(ctx context.Context, outConnector msgConn[*TCPMessage]) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		msgOut, err := ts.fanIn.ReadTask()
+		if err != nil {
+			continue
+		}
+
+		if err := outConnector.Write(msgOut); err != nil {
+			msgOut.Destroy()
+			ts.tel.LogError("failed to write into output connector", err)
+		}
+	}
+}
+
 func (ts *tcpSource) handleConn(ctx context.Context, conn net.Conn, outConnector msgConn[*TCPMessage]) {
+	ts.wg.Add(1)
 	defer ts.wg.Done()
+
 	defer conn.Close()
+
+	go ts.runBridge(ctx, outConnector)
 
 	// Channel to notify when the connection is closed normally
 	connClosed := make(chan struct{})
@@ -397,9 +429,9 @@ loop:
 			// Handle the message and send the result to the output connector
 			outMsg := ts.handleMessage(ctx, msg)
 			outMsg.GetEnvelope().RemoteAddr = conn.RemoteAddr().String()
-			if err := outConnector.Write(outMsg); err != nil {
+			if err := ts.fanIn.AddTask(outMsg); err != nil {
 				outMsg.Destroy()
-				ts.tel.LogError("failed to write message to output connector", err)
+				ts.tel.LogError("failed to write message to fan in connector", err)
 			}
 
 			// Remove the message from the accumulator
@@ -512,6 +544,13 @@ func (ts *tcpSource) handleMessage(ctx context.Context, rawMsg []byte) *msg[*TCP
 	return msg
 }
 
+func (ts *tcpSource) close() {
+	ts.listener.Close()
+
+	ts.wg.Wait()
+	ts.fanIn.Close()
+}
+
 /////////////
 //  STAGE  //
 /////////////
@@ -528,6 +567,7 @@ type TCPStage struct {
 // NewTCPStage returns a new TCP stage.
 func NewTCPStage(outputConnector msgConn[*TCPMessage], cfg *TCPConfig) *TCPStage {
 	source := newTCPSource(&tcpSourceConfig{
+		fanInBufferSize:      cfg.OutputQueueSize,
 		readTimeout:          cfg.ReadTimeout,
 		framingMode:          cfg.FramingMode,
 		maxMsgSize:           cfg.MaxMessageSize,
@@ -554,4 +594,10 @@ func (ts *TCPStage) Init(ctx context.Context) error {
 	}
 
 	return ts.stage.Init(ctx)
+}
+
+// Close closes the stage.
+func (ts *TCPStage) Close() {
+	ts.source.close()
+	ts.stage.Close()
 }

@@ -99,7 +99,7 @@ func newUDPSource() *udpSource {
 	return &udpSource{}
 }
 
-func (us *udpSource) SetTelemetry(tel *internal.Telemetry) {
+func (us *udpSource) setTelemetry(tel *internal.Telemetry) {
 	us.tel = tel
 }
 
@@ -127,7 +127,7 @@ func (us *udpSource) initMetrics() {
 	us.tel.NewCounter("received_bytes", func() int64 { return us.receivedBytes.Load() })
 }
 
-func (us *udpSource) Run(ctx context.Context, outConnector msgConn[*UDPMessage]) {
+func (us *udpSource) run(ctx context.Context, outConnector msgConn[*UDPMessage]) {
 	// Hacky method to close the connection when the context is done
 	go func() {
 		<-ctx.Done()

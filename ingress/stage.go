@@ -7,8 +7,8 @@ import (
 )
 
 type source[Out msgEnv] interface {
-	SetTelemetry(tel *internal.Telemetry)
-	Run(ctx context.Context, outputConnector msgConn[Out])
+	setTelemetry(tel *internal.Telemetry)
+	run(ctx context.Context, outputConnector msgConn[Out])
 }
 
 type stage[Out msgEnv] struct {
@@ -21,7 +21,7 @@ type stage[Out msgEnv] struct {
 
 func newStage[Out msgEnv](name string, source source[Out], outConn msgConn[Out]) *stage[Out] {
 	tel := internal.NewTelemetry("ingress", name)
-	source.SetTelemetry(tel)
+	source.setTelemetry(tel)
 
 	return &stage[Out]{
 		tel: tel,
@@ -39,7 +39,7 @@ func (s *stage[Out]) Init(_ context.Context) error {
 }
 
 func (s *stage[Out]) Run(ctx context.Context) {
-	s.source.Run(ctx, s.outputConnector)
+	s.source.run(ctx, s.outputConnector)
 }
 
 func (s *stage[Out]) Close() {

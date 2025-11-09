@@ -247,7 +247,7 @@ func newKafkaSource() *kafkaSource {
 	return &kafkaSource{}
 }
 
-func (ks *kafkaSource) SetTelemetry(tel *internal.Telemetry) {
+func (ks *kafkaSource) setTelemetry(tel *internal.Telemetry) {
 	ks.tel = tel
 }
 
@@ -262,7 +262,7 @@ func (ks *kafkaSource) initMetrics() {
 	ks.tel.NewCounter("received_bytes", func() int64 { return ks.receivedBytes.Load() })
 }
 
-func (ks *kafkaSource) Run(ctx context.Context, outConnector msgConn[*KafkaMessage]) {
+func (ks *kafkaSource) run(ctx context.Context, outConnector msgConn[*KafkaMessage]) {
 	for {
 		select {
 		case <-ctx.Done():
