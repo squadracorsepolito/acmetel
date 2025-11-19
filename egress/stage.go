@@ -7,7 +7,6 @@ import (
 	"github.com/squadracorsepolito/acmetel/connector"
 	"github.com/squadracorsepolito/acmetel/internal"
 	"github.com/squadracorsepolito/acmetel/internal/pool"
-	"github.com/squadracorsepolito/acmetel/internal/rb"
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
 )
 
@@ -119,7 +118,7 @@ func (s *stageSingle[WArgs, In]) Run(ctx context.Context) {
 				return
 			}
 
-			if !errors.Is(err, rb.ErrReadTimeout) {
+			if !errors.Is(err, connector.ErrReadTimeout) {
 				s.tel.LogError("failed to read from input connector", err)
 			}
 
@@ -187,7 +186,7 @@ func (s *stagePool[WArgs, In]) Run(ctx context.Context) {
 				return
 			}
 
-			if !errors.Is(err, rb.ErrReadTimeout) {
+			if !errors.Is(err, connector.ErrReadTimeout) {
 				s.tel.LogError("failed to read from input connector", err)
 			}
 
