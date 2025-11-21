@@ -262,7 +262,7 @@ func (fr *fileReader) read(ctx context.Context) {
 	}
 
 	reader := bufio.NewReaderSize(fr.file, fr.cfg.chunkSize)
-	buf := make([]byte, fr.cfg.maxChunkSize)
+	buf := make([]byte, fr.cfg.chunkSize)
 
 	go func() {
 		<-ctx.Done()
