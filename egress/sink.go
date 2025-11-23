@@ -25,7 +25,7 @@ func NewSinkStage[T msgEnv](inputConnector msgConn[T]) *SinkStage[T] {
 }
 
 // Init initializes the sink stage.
-func (ss *SinkStage[T]) Init() error {
+func (ss *SinkStage[T]) Init(_ context.Context) error {
 	ss.stageBase.init()
 	return nil
 }

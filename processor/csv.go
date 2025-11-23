@@ -1,236 +1,194 @@
 package processor
 
 import (
-	"errors"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
-	"unicode/utf8"
 
 	stageCommon "github.com/squadracorsepolito/acmetel/internal/stage"
+)
+
+// CSVColumnType represents the type of a CSV column.
+type CSVColumnType uint8
+
+const (
+	// CSVColumnTypeString represents a column with string values.
+	CSVColumnTypeString CSVColumnType = iota
+	// CSVColumnTypeInt represents a column with integer values.
+	CSVColumnTypeInt
+	// CSVColumnTypeFloat represents a column with float values.
+	CSVColumnTypeFloat
+	// CSVColumnTypeBool represents a column with boolean values.
+	CSVColumnTypeBool
+	// CSVColumnTypeTimestamp represents a column with timestamp values.
+	CSVColumnTypeTimestamp
 )
 
 //////////////
 //  CONFIG  //
 //////////////
 
-type CSVValueType uint8
-
-const (
-	CSVValueTypeString CSVValueType = iota
-	CSVValueTypeInt
-	CSVValueTypeFloat
-	CSVValueTypeBool
-	CSVValueTypeTimestamp
-)
-
-type CSVColumn struct {
-	Name           string
-	Type           CSVValueType
-	IsDataValid    bool
-	StringValue    string
-	IntValue       int64
-	FloatValue     float64
-	BoolValue      bool
-	TimestampValue time.Time
-}
-
+// CSVColumnDef represents the definition of a CSV column.
 type CSVColumnDef struct {
-	Name            string
-	Type            CSVValueType
+	// Name is the name of the column.
+	Name string
+
+	// Type is the type of the column.
+	Type CSVColumnType
+
+	// TimestampLayout is the layout used to parse the timestamp column.
+	// If empty, the RFC3339 layout is used.
 	TimestampLayout string
 }
 
+// NewCSVColumnDef returns a new csv column definition.
+func NewCSVColumnDef(name string, valueType CSVColumnType) *CSVColumnDef {
+	return &CSVColumnDef{
+		Name: name,
+		Type: valueType,
+	}
+}
+
+func (cd *CSVColumnDef) getTimestampLayout() string {
+	if cd.TimestampLayout != "" {
+		return cd.TimestampLayout
+	}
+
+	return time.RFC3339
+}
+
+// CSVConfig represents the configuration of the CSV decoder/encoder stages.
 type CSVConfig struct {
 	Stage *stageCommon.Config
 
+	// Columns is the list of column definitions.
 	Columns []*CSVColumnDef
 }
 
+// DefaultCSVConfig returns the default configuration for the CSV decoder/encoder stages.
+// It returns an empty list of column definitions;
+// use the provided methods to add column definitions.
+func DefaultCSVConfig(runningMode stageCommon.RunningMode) *CSVConfig {
+	return &CSVConfig{
+		Stage:   stageCommon.DefaultConfig(runningMode),
+		Columns: []*CSVColumnDef{},
+	}
+}
+
+// AddColumnDef adds a column definition to the list of definitions.
+func (c *CSVConfig) AddColumnDef(colDef *CSVColumnDef) {
+	c.Columns = append(c.Columns, colDef)
+}
+
 ///////////////
-//  DECODER  //
+//  MESSAGE  //
 ///////////////
 
-var csvDecoderBoolTrueIdents = map[string]struct{}{
-	"true": {},
-	"1":    {},
-	"yes":  {},
+// CSVColumn represents a column entry in a CSV message.
+type CSVColumn struct {
+	// Name is the name of the column.
+	Name string
+
+	// Type is the type of the column.
+	Type CSVColumnType
+
+	// IsDataValid states whether the data in the column is valid.
+	IsDataValid bool
+
+	// StringValue is the value of the column if it is a string.
+	StringValue string
+
+	// IntValue is the value of the column if it is an integer.
+	IntValue int64
+
+	// FloatValue is the value of the column if it is a float.
+	FloatValue float64
+
+	// BoolValue is the value of the column if it is a boolean.
+	BoolValue bool
+
+	// TimestampValue is the value of the column if it is a timestamp.
+	TimestampValue time.Time
 }
 
-var csvDecoderBoolFalseIdents = map[string]struct{}{
-	"false": {},
-	"0":     {},
-	"no":    {},
-}
-
-type csvDecoder struct {
-	columnDefs  []*CSVColumnDef
-	columnCount int
-}
-
-func newCSVDecoder(config *CSVConfig) *csvDecoder {
-	return &csvDecoder{
-		columnDefs:  config.Columns,
-		columnCount: len(config.Columns),
-	}
-}
-
-func (cd *csvDecoder) decode(data []byte) ([][]*CSVColumn, error) {
-	acc := &strings.Builder{}
-
-	rows := make([][]*CSVColumn, 0, 128)
-
-	row := make([]*CSVColumn, cd.columnCount)
-	columnIdx := 0
-
-	idx := 0
-	for idx < len(data) {
-		if columnIdx == 0 {
-			if idx != 0 {
-				// Finished a row
-				rows = append(rows, row)
-			}
-
-			// Start a new row
-			row = make([]*CSVColumn, cd.columnCount)
-		}
-
-		r, size := utf8.DecodeRune(data[idx:])
-		idx += size
-
-		switch r {
-		case ',', '\n':
-			// Found a column
-			col := cd.decodeColumn(acc.String(), columnIdx)
-
-			row[columnIdx] = col
-			columnIdx++
-
-			// Reached end of row
-			if columnIdx == cd.columnCount {
-				// Check if new line symbol is valid.
-				// Consider that the last row may not end with a new line.
-				if r != '\n' && idx < len(data) {
-					// Invalid CSV format, expected new line
-					return nil, errors.New("invalid CSV format: expected new line")
-				}
-
-				columnIdx = 0
-				acc.Reset()
-				rows = append(rows, row)
-			}
-
-		case '\r':
-			// Ignore carriage return
-			continue
-
-		default:
-			acc.WriteRune(r)
-		}
-	}
-
-	// Check if the last row is incomplete
-	if columnIdx != 0 {
-		return nil, errors.New("invalid CSV format: incomplete row at the end")
-	}
-
-	return rows, nil
-}
-
-func (cd *csvDecoder) initColumnValue(columnIdx int) *CSVColumn {
+func newCSVColumn(name string, typ CSVColumnType) *CSVColumn {
 	return &CSVColumn{
-		Name: cd.columnDefs[columnIdx].Name,
-		Type: cd.columnDefs[columnIdx].Type,
+		Name:        name,
+		Type:        typ,
+		IsDataValid: true,
 	}
 }
 
-func (cd *csvDecoder) decodeColumn(columnData string, columnIdx int) *CSVColumn {
-	column := cd.initColumnValue(columnIdx)
-	column.IsDataValid = true
-
-	switch column.Type {
-	case CSVValueTypeString:
-		cd.decodeString(column, columnData)
-
-	case CSVValueTypeInt:
-		cd.decodeInt(column, columnData)
-
-	case CSVValueTypeFloat:
-		cd.decodeFloat(column, columnData)
-
-	case CSVValueTypeBool:
-		cd.decodeBool(column, columnData)
-
-	case CSVValueTypeTimestamp:
-		cd.decodeTimestamp(column, columnData, columnIdx)
-	}
-
-	return column
+// NewCSVStringColumn returns a new string column.
+func NewCSVStringColumn(name string, value string) *CSVColumn {
+	col := newCSVColumn(name, CSVColumnTypeString)
+	col.StringValue = value
+	return col
 }
 
-func (cd *csvDecoder) decodeString(column *CSVColumn, data string) {
-	column.StringValue = data
+// NewCSVIntColumn returns a new integer column.
+func NewCSVIntColumn(name string, value int64) *CSVColumn {
+	col := newCSVColumn(name, CSVColumnTypeInt)
+	col.IntValue = value
+	return col
 }
 
-func (cd *csvDecoder) decodeInt(column *CSVColumn, data string) {
-	intVal, err := strconv.Atoi(data)
-	if err != nil {
-		column.IsDataValid = false
-		return
-	}
-
-	column.IntValue = int64(intVal)
+// NewCSVFloatColumn returns a new float column.
+func NewCSVFloatColumn(name string, value float64) *CSVColumn {
+	col := newCSVColumn(name, CSVColumnTypeFloat)
+	col.FloatValue = value
+	return col
 }
 
-func (cd *csvDecoder) decodeFloat(column *CSVColumn, data string) {
-	floatVal, err := strconv.ParseFloat(data, 64)
-	if err != nil {
-		column.IsDataValid = false
-		return
-	}
-
-	column.FloatValue = floatVal
+// NewCSVBoolColumn returns a new boolean column.
+func NewCSVBoolColumn(name string, value bool) *CSVColumn {
+	col := newCSVColumn(name, CSVColumnTypeBool)
+	col.BoolValue = value
+	return col
 }
 
-func (cd *csvDecoder) decodeBool(column *CSVColumn, data string) {
-	column.BoolValue = false
-
-	if _, ok := csvDecoderBoolTrueIdents[data]; ok {
-		column.BoolValue = true
-		return
-	}
-
-	if _, ok := csvDecoderBoolFalseIdents[data]; ok {
-		return
-	}
-
-	dataLower := strings.ToLower(data)
-	if _, ok := csvDecoderBoolTrueIdents[dataLower]; ok {
-		column.BoolValue = true
-		return
-	}
-
-	if _, ok := csvDecoderBoolFalseIdents[dataLower]; ok {
-		return
-	}
-
-	column.IsDataValid = false
+// NewCSVTimestampColumn returns a new timestamp column.
+func NewCSVTimestampColumn(name string, value time.Time) *CSVColumn {
+	col := newCSVColumn(name, CSVColumnTypeTimestamp)
+	col.TimestampValue = value
+	return col
 }
 
-func (cd *csvDecoder) getCurrentTimestampLayout(currColumn int) string {
-	layout := cd.columnDefs[currColumn].TimestampLayout
-	if layout == "" {
-		layout = time.RFC3339
-	}
-	return layout
+var _ msgEnv = (*CSVMessage)(nil)
+
+var csvMessagePool = sync.Pool{
+	New: func() any {
+		return &CSVMessage{
+			RowCount: 0,
+			Rows:     make([][]*CSVColumn, 0, 256),
+		}
+	},
 }
 
-func (cd *csvDecoder) decodeTimestamp(column *CSVColumn, data string, currColumn int) {
-	timeValue, err := time.Parse(cd.getCurrentTimestampLayout(currColumn), data)
-	if err != nil {
-		column.IsDataValid = false
-		return
-	}
+// CSVMessage represents a CSV message containing a list of rows.
+type CSVMessage struct {
+	// RowCount is the number of rows in the message.
+	RowCount int
 
-	column.TimestampValue = timeValue
+	// Rows is the list of rows in the message.
+	// Each row consists of a list of columns.
+	Rows [][]*CSVColumn
+}
+
+// NewCSVMessage returns a new CSV message.
+// It returns a message from the pool.
+func NewCSVMessage() *CSVMessage {
+	return csvMessagePool.Get().(*CSVMessage)
+}
+
+// Destroy cleans up the message and returns it to the pool.
+func (m *CSVMessage) Destroy() {
+	m.RowCount = 0
+	m.Rows = m.Rows[:0]
+	csvMessagePool.Put(m)
+}
+
+// AddRow adds a row to the message.
+func (m *CSVMessage) AddRow(row []*CSVColumn) {
+	m.RowCount++
+	m.Rows = append(m.Rows, row)
 }

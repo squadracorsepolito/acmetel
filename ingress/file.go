@@ -262,7 +262,7 @@ func (fr *fileReader) read(ctx context.Context) {
 	}
 
 	reader := bufio.NewReaderSize(fr.file, fr.cfg.chunkSize)
-	buf := make([]byte, fr.cfg.maxChunkSize)
+	buf := make([]byte, fr.cfg.chunkSize)
 
 	go func() {
 		<-ctx.Done()
@@ -530,9 +530,9 @@ func (fs *fileSource) init(cfg *FileConfig) error {
 
 	fs.watcher = watcher
 
-	metrics := newFileSourceMetrics(fs.tel)
-	metrics.init()
-	fs.metrics = metrics
+	// Initialize the metrics
+	fs.metrics = newFileSourceMetrics(fs.tel)
+	fs.metrics.init()
 
 	return nil
 }
