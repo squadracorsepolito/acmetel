@@ -41,7 +41,7 @@ func Test_SinkStage(t *testing.T) {
 	}
 
 	stage := NewSinkStage(conn)
-	assert.NoError(stage.Init())
+	assert.NoError(stage.Init(t.Context()))
 
 	go stage.Run(t.Context())
 
