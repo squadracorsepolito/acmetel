@@ -1,5 +1,8 @@
 # acmetel
 
+> [!IMPORTANT]  
+> This project has been moved to [goccia](https://github.com/FerroO2000/goccia) repo.
+
 Data processing pipeline library for Go intended to be used for implementing _near_ real-time telemetry systems. The main focus of the project is to decode CAN messages/signals for the Squadra Corse PoliTO formula SAE race car.
 
 ## Pipeline
